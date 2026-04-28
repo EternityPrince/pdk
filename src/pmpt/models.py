@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 PromptName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 PromptBody = str
 TagName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+ProjectName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 IsoTimestamp = str
 
 
@@ -37,6 +38,8 @@ class Prompt(FrozenModel):
     body: PromptBody
     created_at: IsoTimestamp
     updated_at: IsoTimestamp
+    project_id: int | None = None
+    project_name: str | None = None
     tags: tuple[str, ...] = ()
 
     @field_validator("tags", mode="before")
@@ -49,6 +52,7 @@ class PromptDraft(FrozenModel):
     name: PromptName
     body: PromptBody
     replace: bool = False
+    project_id: int | None = None
     tags: tuple[str, ...] = ()
 
     @field_validator("tags", mode="before")
@@ -86,6 +90,43 @@ class TagSet(FrozenModel):
 class TagSummary(FrozenModel):
     name: str
     prompt_count: int = Field(ge=0)
+
+
+class Project(FrozenModel):
+    id: int = Field(ge=1)
+    name: ProjectName
+    description: str = ""
+    created_at: IsoTimestamp
+    updated_at: IsoTimestamp
+
+
+class ProjectDraft(FrozenModel):
+    name: ProjectName
+    description: str = ""
+
+
+class Note(FrozenModel):
+    id: int = Field(ge=1)
+    project_id: int | None = None
+    project_name: str | None = None
+    title: str | None = None
+    body: str
+    created_at: IsoTimestamp
+    updated_at: IsoTimestamp
+
+
+class NoteDraft(FrozenModel):
+    project_id: int | None = None
+    title: str | None = None
+    body: str
+
+
+class NoteVersion(FrozenModel):
+    id: int = Field(ge=1)
+    note_id: int = Field(ge=1)
+    title: str | None = None
+    body: str
+    created_at: IsoTimestamp
 
 
 class PromptStats(FrozenModel):

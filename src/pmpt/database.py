@@ -62,12 +62,66 @@ class SQLiteDatabase:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS projects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    description TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(prompts)").fetchall()
+            }
+            if "project_id" not in columns:
+                conn.execute("ALTER TABLE prompts ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL")
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS tags (
                     name TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    project_id INTEGER,
+                    title TEXT,
+                    body TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS note_versions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    note_id INTEGER NOT NULL,
+                    title TEXT,
+                    body TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_prompts_project_id ON prompts(project_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_project_id ON notes(project_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_note_versions_note_id ON note_versions(note_id)")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS prompt_tags (

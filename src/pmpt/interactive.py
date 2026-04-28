@@ -9,6 +9,7 @@ from .editor import TextEditor
 from .models import Prompt, TagSet, UsageAction
 from .store import PromptStore
 from .ui import ColorMode, ConsoleStyle, PromptFormatter
+from .variables import VariablePrompter
 
 
 @dataclass
@@ -43,6 +44,8 @@ class InteractiveBrowser:
         clipboard: Clipboard | None = None,
         initial_query: str | None = None,
         initial_tags: tuple[str, ...] = (),
+        project_id: int | None = None,
+        project_filter: bool = False,
     ) -> None:
         self._store = store
         self._editor = editor
@@ -52,6 +55,8 @@ class InteractiveBrowser:
         self._formatter = PromptFormatter(self._style)
         self._clipboard = clipboard or Clipboard()
         self._state = BrowserState(query=initial_query, tags=initial_tags)
+        self._project_id = project_id
+        self._project_filter = project_filter
 
     def run(self) -> int:
         self._line(self._style.paint("Prompt Deck browser", "bold", "magenta"))
@@ -65,7 +70,10 @@ class InteractiveBrowser:
             if command in {"?", "help"}:
                 self._render_help()
                 continue
-            if command in {"", "r", "refresh"}:
+            if command in {"r", "refresh"}:
+                continue
+            if command in {"", "o", "open"}:
+                self._open_by_index(prompts, 1)
                 continue
             if command == "/":
                 self._state = BrowserState()
@@ -85,7 +93,12 @@ class InteractiveBrowser:
             self._state = BrowserState(query=command or None)
 
     def _matching_prompts(self) -> list[Prompt]:
-        return self._store.list(tags=self._state.tags, query=self._state.query)
+        return self._store.list(
+            tags=self._state.tags,
+            query=self._state.query,
+            project_id=self._project_id,
+            project_filter=self._project_filter,
+        )
 
     def _render_home(self, prompts: list[Prompt]) -> None:
         filters = []
@@ -113,11 +126,15 @@ class InteractiveBrowser:
         self._line("  tags        show tag aggregation")
         self._line("  /           clear search and tag filters")
         self._line("  number      open a prompt")
+        self._line("  o/Enter     open the first prompt")
         self._line("  r           refresh")
         self._line("  q           quit")
 
     def _render_tags(self) -> None:
-        tags = self._store.tags()
+        tags = self._store.tags(
+            project_id=self._project_id,
+            project_filter=self._project_filter,
+        )
         if not tags:
             self._line(self._style.paint("No tags yet.", "yellow"))
             return
@@ -134,19 +151,48 @@ class InteractiveBrowser:
 
     def _open_prompt(self, name: str) -> None:
         while True:
+            prompts = self._matching_prompts()
+            names = [prompt.name for prompt in prompts]
+            if name not in names:
+                self._line(self._style.paint("Current prompt is outside the active filter.", "yellow"))
+                return
+            index = names.index(name)
             prompt = self._store.get(name)
             self._render_prompt(prompt)
             command = self._ask("prompt> ").strip()
-            if command in {"b", "back", ""}:
+            if command == "":
+                self._print_prompt(prompt)
+                self._store.record_usage(UsageAction.BROWSE, [prompt.name], detail="show")
+                continue
+            if command in {"b", "back"}:
                 return
             if command in {"q", "quit", "exit"}:
                 raise SystemExit(0)
-            if command in {"p", "print"}:
+            if command in {"o", "open", "show"}:
+                self._print_prompt(prompt)
+                self._store.record_usage(UsageAction.BROWSE, [prompt.name], detail="show")
+                continue
+            if command in {"print"}:
                 self._print_prompt(prompt)
                 self._store.record_usage(UsageAction.BROWSE, [prompt.name], detail="print")
                 continue
+            if command in {"n", "next"}:
+                if index + 1 >= len(prompts):
+                    self._line(self._style.paint("Already at the last prompt.", "yellow"))
+                else:
+                    name = prompts[index + 1].name
+                continue
+            if command in {"p", "prev", "previous"}:
+                if index == 0:
+                    self._line(self._style.paint("Already at the first prompt.", "yellow"))
+                else:
+                    name = prompts[index - 1].name
+                continue
             if command in {"c", "copy"}:
                 self._copy_prompt(prompt)
+                continue
+            if command in {"cf", "copy filled", "copy-filled"}:
+                self._copy_filled_prompt(prompt)
                 continue
             if command in {"e", "edit"}:
                 self._edit_prompt(prompt)
@@ -163,22 +209,45 @@ class InteractiveBrowser:
             if command in {"?", "help"}:
                 self._render_prompt_help()
                 continue
+            if command == "/":
+                self._state = BrowserState()
+                continue
+            if command.startswith("/"):
+                self._state = BrowserState(query=command[1:].strip() or None)
+                matches = self._matching_prompts()
+                if matches:
+                    name = matches[0].name
+                else:
+                    self._line(self._style.paint("No prompts found.", "yellow"))
+                continue
             self._line(self._style.paint("Unknown action. Type ? for actions.", "yellow"))
 
     def _render_prompt(self, prompt: Prompt) -> None:
         self._line("")
         self._line(self._style.paint(prompt.name, "bold", "magenta") + self._formatter.tag_text(prompt))
-        self._line(self._formatter.preview(prompt.body, 140))
+        self._line(f"created: {prompt.created_at}")
+        self._line(f"updated: {prompt.updated_at}")
+        self._line(f"project: {prompt.project_name or 'unbound'}")
+        self._line(f"tags: {', '.join(prompt.tags) or '-'}")
+        self._line("")
+        self._stdout.write(prompt.body)
+        if not prompt.body.endswith("\n"):
+            self._line("")
         self._line(
             self._style.paint("actions:", "dim")
-            + " p=print c=copy e=edit f=feedback t=tags v=versions b=back q=quit"
+            + " enter/o=show n=next p=prev c=copy cf=copy-filled print=print "
+            + "e=edit f=feedback t=tags v=versions b=back q=quit"
         )
 
     def _render_prompt_help(self) -> None:
         self._line("")
         self._line(self._style.paint("Prompt actions", "bold"))
-        self._line("  p  print full prompt body")
-        self._line("  c  copy full prompt body with pbcopy when available")
+        self._line("  Enter/o  show full prompt body again")
+        self._line("  n/p      next or previous prompt in the active list")
+        self._line("  /text    search and jump to the first match")
+        self._line("  c        copy raw prompt body with pbcopy when available")
+        self._line("  cf       fill variables, then copy the rendered prompt")
+        self._line("  print    print full prompt body")
         self._line("  e  edit prompt in $EDITOR")
         self._line("  f  add feedback in $EDITOR")
         self._line("  t  add or remove tags")
@@ -200,6 +269,23 @@ class InteractiveBrowser:
         if copied:
             self._store.record_usage(UsageAction.BROWSE, [prompt.name], detail="copy")
             self._line(self._style.paint("Copied to clipboard.", "green"))
+        else:
+            self._line(self._style.paint("Clipboard command is not available.", "yellow"))
+
+    def _copy_filled_prompt(self, prompt: Prompt) -> None:
+        try:
+            filled = VariablePrompter(
+                self._editor,
+                self._stdin,
+                self._stdout,
+                color="never",
+            ).fill(prompt.body)
+            copied = self._clipboard.copy(filled)
+        except subprocess.CalledProcessError:
+            copied = False
+        if copied:
+            self._store.record_usage(UsageAction.BROWSE, [prompt.name], detail="copy filled")
+            self._line(self._style.paint("Copied filled prompt to clipboard.", "green"))
         else:
             self._line(self._style.paint("Clipboard command is not available.", "yellow"))
 

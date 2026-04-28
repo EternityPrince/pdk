@@ -25,6 +25,41 @@ pdk --scope global show review
 
 By default `pdk` uses `--scope auto`: inside a folder with `.pdk/`, or any nested folder below it, commands use `.pdk/prompts.sqlite3`. Outside a project, commands use the global prompt store. Use `--scope global` or `--scope project` to force one side.
 
+Named projects live inside whichever store `--scope` selects:
+
+```bash
+pdk project create client-a "Client A launch"
+pdk project use client-a
+pdk add launch-review < review.md
+pdk list
+pdk add general-template --no-project < template.md
+pdk project assign client-a existing-prompt
+pdk project unassign existing-prompt
+pdk project clear
+```
+
+Prompts can belong to one named project or stay unbound. `pdk add`, `list`, `find`, `browse`, `stats`, and `export` use the active named project when one is set. Pass `--project NAME` for a one-command override or `--no-project` for unbound prompts.
+
+Notes are unbound by default, even when a project is active:
+
+```bash
+pdk note add "Things to remember"
+pdk note add "Launch notes" --project client-a
+pdk note list --project client-a
+pdk note show 1
+pdk note edit 1
+pdk note versions 1
+```
+
+Markdown export includes prompts, notes, comments, previous versions, and usage history:
+
+```bash
+pdk export
+pdk context client-a > context.md
+pdk export --all
+pdk export --no-project
+```
+
 Useful navigation and history commands:
 
 ```bash
@@ -40,6 +75,7 @@ pdk versions review --show 1
 pdk versions review --prune --yes
 pdk feedback review < feedback.txt
 pdk feedback review --list
+pdk comment review < comment.txt
 pdk browse
 ```
 
