@@ -278,7 +278,7 @@ class CliTest(unittest.TestCase):
             0,
         )
 
-        browsed = run_pmpt(self.tmp_path, "browse", "--query", "study", input="1\np\nb\nq\n")
+        browsed = run_pmpt(self.tmp_path, "browse", "--plain", "--query", "study", input="1\nprint\nb\nq\n")
 
         self.assertEqual(browsed.returncode, 0)
         self.assertIn("Prompt Deck browser", browsed.stdout)
@@ -286,11 +286,19 @@ class CliTest(unittest.TestCase):
         self.assertIn("Explain fractions clearly.", browsed.stdout)
         self.assertNotIn("work #job", browsed.stdout)
 
+    def test_browse_falls_back_to_plain_when_not_tty(self):
+        self.assertEqual(run_pmpt(self.tmp_path, "add", "plain", input="Plain body").returncode, 0)
+
+        browsed = run_pmpt(self.tmp_path, "browse", input="q\n")
+
+        self.assertEqual(browsed.returncode, 0)
+        self.assertIn("Prompt Deck browser", browsed.stdout)
+
     def test_browse_open_prompt_shows_full_body(self):
         long_body = "Start " + ("detail " * 40) + "full ending"
         self.assertEqual(run_pmpt(self.tmp_path, "add", "long", input=long_body).returncode, 0)
 
-        browsed = run_pmpt(self.tmp_path, "browse", input="1\nb\nq\n")
+        browsed = run_pmpt(self.tmp_path, "browse", "--plain", input="1\nb\nq\n")
 
         self.assertEqual(browsed.returncode, 0)
         self.assertIn(long_body, browsed.stdout)
@@ -302,7 +310,7 @@ class CliTest(unittest.TestCase):
             0,
         )
 
-        browsed = run_pmpt(self.tmp_path, "browse", input="1\nt\n+exam -study\nb\nq\n")
+        browsed = run_pmpt(self.tmp_path, "browse", "--plain", input="1\nt\n+exam -study\nb\nq\n")
         self.assertEqual(browsed.returncode, 0)
         self.assertIn("Tags added: exam", browsed.stdout)
         self.assertIn("Tags removed: study", browsed.stdout)
@@ -318,7 +326,7 @@ class CliTest(unittest.TestCase):
         )
         self.assertEqual(run_pmpt(self.tmp_path, "add", "beta", input="Beta body").returncode, 0)
 
-        browsed = run_pmpt(self.tmp_path, "browse", input="\nn\np\n/bet\nb\nq\n")
+        browsed = run_pmpt(self.tmp_path, "browse", "--plain", input="\nn\np\n/bet\nb\nq\n")
 
         self.assertEqual(browsed.returncode, 0)
         self.assertIn("alpha #first", browsed.stdout)

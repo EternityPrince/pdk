@@ -77,11 +77,29 @@ pdk feedback review < feedback.txt
 pdk feedback review --list
 pdk comment review < comment.txt
 pdk browse
+pdk browse --plain
 ```
 
 `pdk list` prints a compact catalog table with prompt names, tags, use counts, edit counts, feedback counts, and last-used time. It intentionally omits prompt body previews so the list stays useful as an inventory.
 
-Inside `pdk browse`:
+`pdk browse` opens a fullscreen terminal UI when stdin/stdout are attached to a terminal. If it is run through pipes, captured output, or with `--plain`, it uses the original line-based browser.
+
+Inside fullscreen `pdk browse`:
+
+```text
+/           focus search
+#tag        type in search and press Enter to toggle a tag filter
+Esc         clear search text
+Enter/c     copy the selected prompt
+f           fill variables in $EDITOR, then copy
+e           edit prompt in $EDITOR
+t           add/remove tags with +tag and -tag
+v           show previous versions
+?           show help
+q           quit
+```
+
+Inside `pdk browse --plain`:
 
 ```text
 text        search by name, body, or tag
@@ -95,12 +113,15 @@ number      open a prompt
 Prompt actions inside the browser:
 
 ```text
-p  print full prompt body
+enter/o  show full prompt body again
 c  copy full prompt body with pbcopy
+cf fill variables, then copy the rendered prompt
 e  edit prompt in $EDITOR
 f  add feedback in $EDITOR
 t  add/remove tags with +tag and -tag
 v  show previous versions
+print  print full prompt body
+n/p  next or previous prompt in the active list
 b  back to list
 q  quit
 ```

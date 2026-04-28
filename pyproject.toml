@@ -8,10 +8,13 @@ version = "0.1.0"
 description = "Prompt Deck is a tiny global prompt store CLI."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["pydantic>=2.0"]
+dependencies = ["pydantic>=2.0", "textual>=8.2,<9"]
 
 [project.scripts]
 pdk = "pmpt.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

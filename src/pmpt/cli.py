@@ -367,18 +367,32 @@ def cmd_feedback(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr
 def cmd_browse(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
     store = _store(args)
     project_id, project_filter, _ = _project_selection(args, store)
-    browser = InteractiveBrowser(
+    editor = TextEditor.from_environment()
+    initial_tags = tuple(_split_tags(args.tag))
+    if args.plain or not stdin.isatty() or not stdout.isatty():
+        browser = InteractiveBrowser(
+            store,
+            editor,
+            stdin,
+            stdout,
+            color=args.color,
+            initial_query=args.query,
+            initial_tags=initial_tags,
+            project_id=project_id,
+            project_filter=project_filter,
+        )
+        return browser.run()
+
+    from .tui import run_tui_browser
+
+    return run_tui_browser(
         store,
-        TextEditor.from_environment(),
-        stdin,
-        stdout,
-        color=args.color,
+        editor,
         initial_query=args.query,
-        initial_tags=tuple(_split_tags(args.tag)),
+        initial_tags=initial_tags,
         project_id=project_id,
         project_filter=project_filter,
     )
-    return browser.run()
 
 
 def cmd_project_init(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
@@ -1125,12 +1139,18 @@ Examples:
   pdk browse --query review
   pdk browse --tag work
   pdk browse --project client-a
+  pdk browse --plain
+
+Controls:
+  / focuses search, #tag toggles tag filters, Enter/c copies, f fills
+  variables and copies, e edits, t edits tags, v opens versions, q quits.
 """,
     )
     browse.add_argument("--tag", action="append", help="start with a tag filter")
     browse.add_argument("--query", help="start with a text search")
     browse.add_argument("--project", help="filter by named project")
     browse.add_argument("--no-project", action="store_true", help="filter unbound prompts")
+    browse.add_argument("--plain", action="store_true", help="use the original line-based browser")
     browse.set_defaults(func=cmd_browse)
 
     project = subparsers.add_parser(
