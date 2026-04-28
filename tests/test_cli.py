@@ -31,7 +31,7 @@ def run_pmpt(
     cwd: Path | None = None,
 ):
     full_env = os.environ.copy()
-    full_env["PMPT_HOME"] = str(tmp_path / "pmpt-home")
+    full_env["PDK_HOME"] = str(tmp_path / "pdk-home")
     full_env["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + full_env.get("PYTHONPATH", "")
     if env:
         full_env.update(env)
@@ -66,6 +66,12 @@ class CliTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_help_uses_pdk_program_name(self):
+        helped = run_pmpt(self.tmp_path, "--help")
+        self.assertEqual(helped.returncode, 0)
+        self.assertIn("usage: pdk", helped.stdout)
+        self.assertIn("Prompt Deck", helped.stdout)
+
     def test_add_show_and_list(self):
         added = run_pmpt(
             self.tmp_path,
@@ -83,7 +89,23 @@ class CliTest(unittest.TestCase):
 
         listed = run_pmpt(self.tmp_path, "list")
         self.assertEqual(listed.returncode, 0)
-        self.assertIn("review\tReview this carefully. Second line.", listed.stdout)
+        self.assertIn("prompt", listed.stdout)
+        self.assertIn("uses", listed.stdout)
+        self.assertRegex(listed.stdout, r"review\s+1\s+0\s+0\s+\d{4}-\d{2}-\d{2} \d{2}:\d{2}\s+-")
+        self.assertNotIn("Review this carefully", listed.stdout)
+
+    def test_list_orders_prompts_by_usage(self):
+        self.assertEqual(run_pmpt(self.tmp_path, "add", "rare", input="rare body").returncode, 0)
+        self.assertEqual(run_pmpt(self.tmp_path, "add", "popular", input="popular body").returncode, 0)
+        self.assertEqual(run_pmpt(self.tmp_path, "add", "unused", input="unused body").returncode, 0)
+
+        self.assertEqual(run_pmpt(self.tmp_path, "show", "rare").returncode, 0)
+        self.assertEqual(run_pmpt(self.tmp_path, "show", "popular").returncode, 0)
+        self.assertEqual(run_pmpt(self.tmp_path, "show", "popular").returncode, 0)
+
+        listed = run_pmpt(self.tmp_path, "list")
+        names = [line.split()[0] for line in listed.stdout.splitlines()[1:]]
+        self.assertEqual(names, ["popular", "rare", "unused"])
 
     def test_add_duplicate_errors_and_replace_updates(self):
         self.assertEqual(run_pmpt(self.tmp_path, "add", "review", input="old").returncode, 0)
@@ -113,13 +135,30 @@ class CliTest(unittest.TestCase):
     def test_show_fills_variables_once_with_editor_and_stdout_only_result(self):
         body = "Hello {{name}}\n{{body}}\nAgain {{name}}"
         self.assertEqual(run_pmpt(self.tmp_path, "add", "letter", input=body).returncode, 0)
-        env = editor_env(self.tmp_path, ["Ada", "Line 1\n{{name}}\nLine 2"])
+        env = editor_env(
+            self.tmp_path,
+            [
+                "\n".join(
+                    [
+                        "# pdk variable form",
+                        "--- pdk begin {{name}} ---",
+                        "Ada",
+                        "--- pdk end {{name}} ---",
+                        "--- pdk begin {{body}} ---",
+                        "Line 1",
+                        "{{name}}",
+                        "Line 2",
+                        "--- pdk end {{body}} ---",
+                        "",
+                    ]
+                )
+            ],
+        )
 
         shown = run_pmpt(self.tmp_path, "show", "letter", env=env)
         self.assertEqual(shown.returncode, 0)
         self.assertEqual(shown.stdout, "Hello Ada\nLine 1\n{{name}}\nLine 2\nAgain Ada")
-        self.assertIn("Value for {{name}}", shown.stderr)
-        self.assertIn("Value for {{body}}", shown.stderr)
+        self.assertEqual(shown.stderr, "")
         self.assertNotIn("Value for", shown.stdout)
 
     def test_remove_requires_yes_and_deletes_prompt(self):
@@ -158,8 +197,9 @@ class CliTest(unittest.TestCase):
         self.assertIn("#exam\t1", tags.stdout)
 
         by_tag = run_pmpt(self.tmp_path, "list", "--tag", "study")
-        self.assertIn("study-review\tReview my essay", by_tag.stdout)
+        self.assertIn("study-review", by_tag.stdout)
         self.assertIn("#study", by_tag.stdout)
+        self.assertNotIn("Review my essay", by_tag.stdout)
 
         found = run_pmpt(self.tmp_path, "find", "essay", "--tag", "school")
         self.assertIn("study-review", found.stdout)
@@ -232,7 +272,7 @@ class CliTest(unittest.TestCase):
         browsed = run_pmpt(self.tmp_path, "browse", "--query", "study", input="1\np\nb\nq\n")
 
         self.assertEqual(browsed.returncode, 0)
-        self.assertIn("pmpt browser", browsed.stdout)
+        self.assertIn("Prompt Deck browser", browsed.stdout)
         self.assertIn("lesson #study", browsed.stdout)
         self.assertIn("Explain fractions clearly.", browsed.stdout)
         self.assertNotIn("work #job", browsed.stdout)
@@ -261,7 +301,7 @@ class CliTest(unittest.TestCase):
 
         initialized = run_pmpt(self.tmp_path, "project", "init", cwd=project)
         self.assertEqual(initialized.returncode, 0)
-        self.assertTrue((project / ".pmpt" / "prompts.sqlite3").exists())
+        self.assertTrue((project / ".pdk" / "prompts.sqlite3").exists())
 
         project_add = run_pmpt(self.tmp_path, "add", "review", input="project", cwd=project)
         self.assertEqual(project_add.returncode, 0)
@@ -292,6 +332,7 @@ class CliTest(unittest.TestCase):
         missing = run_pmpt(self.tmp_path, "--scope", "project", "list", cwd=self.tmp_path)
         self.assertEqual(missing.returncode, 1)
         self.assertIn("project is not initialized", missing.stderr)
+        self.assertIn("pdk project init", missing.stderr)
 
 
 if __name__ == "__main__":

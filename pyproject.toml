@@ -3,15 +3,15 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pmpt"
+name = "prompt-deck"
 version = "0.1.0"
-description = "A tiny global prompt store CLI."
+description = "Prompt Deck is a tiny global prompt store CLI."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["pydantic>=2.0"]
 
 [project.scripts]
-pmpt = "pmpt.cli:main"
+pdk = "pmpt.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

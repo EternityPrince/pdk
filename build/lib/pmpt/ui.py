@@ -80,4 +80,4 @@ class StatusReporter:
         print(self._style.paint(message, "yellow"), file=self._stream)
 
     def error(self, message: str) -> None:
-        print(f"pdk: {self._style.paint(message, 'red')}", file=self._stream)
+        print(f"pmpt: {self._style.paint(message, 'red')}", file=self._stream)

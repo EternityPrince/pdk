@@ -6,8 +6,7 @@ from typing import Literal
 
 from .database import SQLiteDatabase
 
-PROJECT_DIR = ".pdk"
-LEGACY_PROJECT_DIR = ".pmpt"
+PROJECT_DIR = ".pmpt"
 PROJECT_DB = "prompts.sqlite3"
 
 ScopeMode = Literal["auto", "global", "project"]
@@ -51,15 +50,14 @@ class ProjectResolver:
 
         root = self.find_project_root()
         if root is not None:
-            project_dir = self._project_dir_for(root)
             return StoreContext(
                 scope="project",
-                database_path=project_dir / PROJECT_DB,
+                database_path=root / PROJECT_DIR / PROJECT_DB,
                 project_root=root,
             )
 
         if scope == "project":
-            raise ProjectNotFoundError("project is not initialized; run `pdk project init`")
+            raise ProjectNotFoundError("project is not initialized; run `pmpt project init`")
 
         return StoreContext(scope="global", database_path=SQLiteDatabase.default_path())
 
@@ -67,15 +65,6 @@ class ProjectResolver:
         current = self._cwd
         candidates = [current, *current.parents]
         for path in candidates:
-            if self._project_dir_for(path).is_dir():
+            if (path / PROJECT_DIR).is_dir():
                 return path
         return None
-
-    def _project_dir_for(self, root: Path) -> Path:
-        project_dir = root / PROJECT_DIR
-        if project_dir.is_dir():
-            return project_dir
-        legacy_project_dir = root / LEGACY_PROJECT_DIR
-        if legacy_project_dir.is_dir():
-            return legacy_project_dir
-        return project_dir

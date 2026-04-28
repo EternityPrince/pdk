@@ -305,7 +305,7 @@ class PromptStore:
                         prompt_usage.prompt_name AS prompt_name,
                         SUM(CASE WHEN usage_events.action = 'show' THEN 1 ELSE 0 END) AS show_count,
                         SUM(CASE WHEN usage_events.action = 'edit' THEN 1 ELSE 0 END) AS edit_count,
-                        MAX(CASE WHEN usage_events.action = 'show' THEN usage_events.used_at END) AS last_used_at
+                        MAX(usage_events.used_at) AS last_used_at
                     FROM prompt_usage
                     JOIN usage_events ON usage_events.id = prompt_usage.event_id
                     GROUP BY prompt_usage.prompt_name

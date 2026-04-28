@@ -54,7 +54,7 @@ class InteractiveBrowser:
         self._state = BrowserState(query=initial_query, tags=initial_tags)
 
     def run(self) -> int:
-        self._line(self._style.paint("Prompt Deck browser", "bold", "magenta"))
+        self._line(self._style.paint("pmpt browser", "bold", "magenta"))
         self._line("Type text to search, #tag to filter, / to clear, ? for commands, q to quit.")
         while True:
             prompts = self._matching_prompts()

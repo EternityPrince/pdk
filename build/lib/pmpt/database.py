@@ -16,15 +16,10 @@ class SQLiteDatabase:
 
     @staticmethod
     def default_home() -> Path:
-        env_home = os.environ.get("PDK_HOME") or os.environ.get("PMPT_HOME")
+        env_home = os.environ.get("PMPT_HOME")
         if env_home:
             return Path(env_home).expanduser()
-        support_dir = Path.home() / "Library" / "Application Support"
-        home = support_dir / "Prompt Deck"
-        legacy_home = support_dir / "pmpt"
-        if legacy_home.exists() and not home.exists():
-            return legacy_home
-        return home
+        return Path.home() / "Library" / "Application Support" / "pmpt"
 
     @classmethod
     def default_path(cls) -> Path:

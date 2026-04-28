@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import datetime
 from pathlib import Path
 from typing import TextIO
 
@@ -10,11 +9,11 @@ from pydantic import ValidationError
 
 from .editor import EditorError, TextEditor
 from .interactive import InteractiveBrowser
-from .models import Prompt, PromptStats, TagSet, UsageAction
+from .models import Prompt, TagSet, UsageAction
 from .project import ProjectNotFoundError, ProjectResolver
 from .store import PromptExistsError, PromptNotFoundError, PromptStore
+from .templating import find_variables, render_template
 from .ui import ConsoleStyle, PromptFormatter, StatusReporter
-from .variables import VariableFillCancelled, VariablePrompter
 
 
 class CliError(Exception):
@@ -37,9 +36,13 @@ def _store(args: argparse.Namespace) -> PromptStore:
     return PromptStore(_context(args).database_path)
 
 
-def _fill_variables(args: argparse.Namespace, body: str, stdin: TextIO, stderr: TextIO) -> str:
-    prompter = VariablePrompter(TextEditor.from_environment(), stdin, stderr, color=args.color)
-    return prompter.fill(body)
+def _fill_variables(body: str, stderr: TextIO) -> str:
+    editor = TextEditor.from_environment()
+    values: dict[str, str] = {}
+    for name in find_variables(body):
+        print(f"Value for {{{{{name}}}}}: opening $EDITOR", file=stderr, flush=True)
+        values[name] = editor.edit("")
+    return render_template(body, values)
 
 
 def cmd_add(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
@@ -67,7 +70,7 @@ def cmd_edit(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: Te
 def cmd_show(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
     store = _store(args)
     prompt = store.get(args.name)
-    stdout.write(_fill_variables(args, prompt.body, stdin, stderr))
+    stdout.write(_fill_variables(prompt.body, stderr))
     store.record_usage(UsageAction.SHOW, [args.name])
     return 0
 
@@ -77,86 +80,11 @@ def _write_prompt_rows(prompts: list[Prompt], stdout: TextIO, formatter: PromptF
         stdout.write(formatter.prompt_row(prompt))
 
 
-def _short_timestamp(value: str | None) -> str:
-    if value is None:
-        return "-"
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return value
-    return parsed.strftime("%Y-%m-%d %H:%M")
-
-
-def _align_cell(value: str, width: int, align: str = "left") -> str:
-    if align == "right":
-        return value.rjust(width)
-    return value.ljust(width)
-
-
-def _tag_table_cell(prompt: Prompt, style: ConsoleStyle) -> str:
-    if not prompt.tags:
-        return "-"
-    return " ".join(style.paint(f"#{tag}", "cyan") for tag in prompt.tags)
-
-
-def _write_prompt_table(
-    prompts: list[Prompt],
-    stdout: TextIO,
-    style: ConsoleStyle,
-    stats_by_name: dict[str, PromptStats],
-) -> None:
-    def usage_count(prompt: Prompt) -> int:
-        stats = stats_by_name.get(prompt.name)
-        return stats.show_count if stats else 0
-
-    ordered = sorted(
-        prompts,
-        key=lambda prompt: (-usage_count(prompt), prompt.name.casefold()),
-    )
-    headers = ("prompt", "uses", "edits", "feedback", "last used", "tags")
-    rows = []
-    for prompt in ordered:
-        stats = stats_by_name.get(prompt.name)
-        rows.append(
-            (
-                prompt.name,
-                str(stats.show_count if stats else 0),
-                str(stats.edit_count if stats else 0),
-                str(stats.feedback_count if stats else 0),
-                _short_timestamp(stats.last_used_at if stats else None),
-                " ".join(f"#{tag}" for tag in prompt.tags) or "-",
-            )
-        )
-    widths = [
-        max([len(headers[index]), *(len(row[index]) for row in rows)])
-        for index in range(len(headers) - 1)
-    ]
-    aligns = ("left", "right", "right", "right", "left")
-
-    header = [
-        style.paint(_align_cell(headers[index], widths[index], aligns[index]), "bold")
-        for index in range(len(headers) - 1)
-    ]
-    header.append(style.paint(headers[-1], "bold"))
-    stdout.write("  ".join(header) + "\n")
-
-    for prompt, row in zip(ordered, rows, strict=True):
-        cells = []
-        for index, value in enumerate(row[:-1]):
-            cell = _align_cell(value, widths[index], aligns[index])
-            if index == 0:
-                cell = style.paint(cell, "bold", "magenta")
-            cells.append(cell)
-        cells.append(_tag_table_cell(prompt, style))
-        stdout.write("  ".join(cells) + "\n")
-
-
 def cmd_list(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
     store = _store(args)
-    style = ConsoleStyle(args.color, stdout)
+    formatter = PromptFormatter(ConsoleStyle(args.color, stdout))
     prompts = store.list(tags=_split_tags(args.tag), query=args.query)
-    stats_by_name = {stats.name: stats for stats in store.stats()}
-    _write_prompt_table(prompts, stdout, style, stats_by_name)
+    _write_prompt_rows(prompts, stdout, formatter)
     return 0
 
 
@@ -302,8 +230,8 @@ def cmd_project_status(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="pdk",
-        description="Prompt Deck stores prompts globally and prints them for shell pipelines.",
+        prog="pmpt",
+        description="Store prompts globally and print them for shell pipelines.",
     )
     parser.add_argument(
         "--color",
@@ -315,7 +243,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--scope",
         choices=("auto", "global", "project"),
         default="auto",
-        help="choose prompt store; auto uses .pdk when present",
+        help="choose prompt store; auto uses .pmpt when present",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -385,7 +313,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     project = subparsers.add_parser("project", help="manage project-local prompt storage")
     project_subparsers = project.add_subparsers(dest="project_command", required=True)
-    project_init = project_subparsers.add_parser("init", help="initialize .pdk in a folder")
+    project_init = project_subparsers.add_parser("init", help="initialize .pmpt in a folder")
     project_init.add_argument("path", nargs="?", help="project folder; defaults to cwd")
     project_init.set_defaults(func=cmd_project_init)
     project_status = project_subparsers.add_parser("status", help="show active prompt store")
@@ -405,14 +333,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         return args.func(args, sys.stdin, sys.stdout, sys.stderr)
-    except (
-        CliError,
-        PromptNotFoundError,
-        ProjectNotFoundError,
-        EditorError,
-        VariableFillCancelled,
-        ValidationError,
-    ) as exc:
+    except (CliError, PromptNotFoundError, ProjectNotFoundError, EditorError, ValidationError) as exc:
         if isinstance(exc, PromptNotFoundError):
             message = f"prompt not found: {exc.args[0]}"
         elif isinstance(exc, ValidationError):
