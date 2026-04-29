@@ -21,6 +21,7 @@ from .store import (
     PromptNotFoundError,
     PromptStore,
 )
+from .tokens import count_tokens, token_summary
 from .ui import ConsoleStyle, PromptFormatter, StatusReporter
 from .variables import VariableFillCancelled, VariablePrompter
 
@@ -108,6 +109,12 @@ def _fill_variables(args: argparse.Namespace, body: str, stdin: TextIO, stderr: 
     return prompter.fill(body)
 
 
+def _write_token_summary(template: str, rendered: str, stdout: TextIO, stderr: TextIO) -> None:
+    if stdout.isatty() and rendered and not rendered.endswith("\n"):
+        print(file=stderr)
+    print(token_summary(template, rendered), file=stderr)
+
+
 def cmd_add(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
     store = _store(args)
     body = TextEditor.from_environment().read_or_edit(stdin)
@@ -136,7 +143,9 @@ def cmd_edit(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: Te
 def cmd_show(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
     store = _store(args)
     prompt = store.get(args.name)
-    stdout.write(_fill_variables(args, prompt.body, stdin, stderr))
+    rendered = _fill_variables(args, prompt.body, stdin, stderr)
+    stdout.write(rendered)
+    _write_token_summary(prompt.body, rendered, stdout, stderr)
     store.record_usage(UsageAction.SHOW, [args.name])
     return 0
 
@@ -182,13 +191,14 @@ def _write_prompt_table(
         prompts,
         key=lambda prompt: (-usage_count(prompt), prompt.name.casefold()),
     )
-    headers = ("prompt", "uses", "edits", "feedback", "last used", "tags")
+    headers = ("prompt", "tokens", "uses", "edits", "feedback", "last used", "tags")
     rows = []
     for prompt in ordered:
         stats = stats_by_name.get(prompt.name)
         rows.append(
             (
                 prompt.name,
+                str(count_tokens(prompt.body)),
                 str(stats.show_count if stats else 0),
                 str(stats.edit_count if stats else 0),
                 str(stats.feedback_count if stats else 0),
@@ -200,7 +210,7 @@ def _write_prompt_table(
         max([len(headers[index]), *(len(row[index]) for row in rows)])
         for index in range(len(headers) - 1)
     ]
-    aligns = ("left", "right", "right", "right", "left")
+    aligns = ("left", "right", "right", "right", "right", "left")
 
     header = [
         style.paint(_align_cell(headers[index], widths[index], aligns[index]), "bold")
@@ -383,7 +393,27 @@ def cmd_browse(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: 
         )
         return browser.run()
 
-    from .tui import run_tui_browser
+    try:
+        from .tui import run_tui_browser
+    except ModuleNotFoundError as exc:
+        missing = exc.name or ""
+        if missing.split(".", 1)[0] not in {"textual", "rich"}:
+            raise
+        _reporter(args, stderr).warning(
+            f"fullscreen browse is unavailable because {missing} is not installed; using --plain"
+        )
+        browser = InteractiveBrowser(
+            store,
+            editor,
+            stdin,
+            stdout,
+            color=args.color,
+            initial_query=args.query,
+            initial_tags=initial_tags,
+            project_id=project_id,
+            project_filter=project_filter,
+        )
+        return browser.run()
 
     return run_tui_browser(
         store,

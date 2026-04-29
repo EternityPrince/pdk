@@ -9,6 +9,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from pmpt.tokens import count_tokens
+
 
 ROOT = Path(__file__).resolve().parents[1]
 FAKE_EDITOR = r"""
@@ -94,13 +96,17 @@ class CliTest(unittest.TestCase):
         shown = run_pmpt(self.tmp_path, "show", "review")
         self.assertEqual(shown.returncode, 0)
         self.assertEqual(shown.stdout, "Review this carefully.\nSecond line.")
-        self.assertEqual(shown.stderr, "")
+        self.assertEqual(shown.stderr, f"tokens: {count_tokens(shown.stdout)}\n")
 
         listed = run_pmpt(self.tmp_path, "list")
         self.assertEqual(listed.returncode, 0)
         self.assertIn("prompt", listed.stdout)
+        self.assertIn("tokens", listed.stdout)
         self.assertIn("uses", listed.stdout)
-        self.assertRegex(listed.stdout, r"review\s+1\s+0\s+0\s+\d{4}-\d{2}-\d{2} \d{2}:\d{2}\s+-")
+        self.assertRegex(
+            listed.stdout,
+            r"review\s+\d+\s+1\s+0\s+0\s+\d{4}-\d{2}-\d{2} \d{2}:\d{2}\s+-",
+        )
         self.assertNotIn("Review this carefully", listed.stdout)
 
     def test_list_orders_prompts_by_usage(self):
@@ -167,7 +173,10 @@ class CliTest(unittest.TestCase):
         shown = run_pmpt(self.tmp_path, "show", "letter", env=env)
         self.assertEqual(shown.returncode, 0)
         self.assertEqual(shown.stdout, "Hello Ada\nLine 1\n{{name}}\nLine 2\nAgain Ada")
-        self.assertEqual(shown.stderr, "")
+        self.assertEqual(
+            shown.stderr,
+            f"tokens: template={count_tokens(body)} rendered={count_tokens(shown.stdout)}\n",
+        )
         self.assertNotIn("Value for", shown.stdout)
 
     def test_remove_requires_yes_and_deletes_prompt(self):

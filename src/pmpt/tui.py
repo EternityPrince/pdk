@@ -20,6 +20,7 @@ from .interactive import Clipboard
 from .models import Prompt, PromptStats, TagSet, UsageAction
 from .store import PromptStore
 from .templating import find_variables
+from .tokens import count_tokens, token_summary
 from .variables import VariablePrompter
 
 
@@ -41,6 +42,7 @@ class PromptBrowserRow:
     edit_count: int = 0
     feedback_count: int = 0
     last_used_at: str | None = None
+    token_count: int = 0
     variables: tuple[str, ...] = ()
 
     @property
@@ -124,6 +126,7 @@ def row_from_prompt(prompt: Prompt, stats: PromptStats | None = None) -> PromptB
         edit_count=stats.edit_count if stats else 0,
         feedback_count=stats.feedback_count if stats else 0,
         last_used_at=stats.last_used_at if stats else None,
+        token_count=count_tokens(prompt.body),
         variables=tuple(find_variables(prompt.body)),
     )
 
@@ -316,6 +319,7 @@ class PromptDeckTui(App[int]):
         table.cursor_type = "row"
         table.zebra_stripes = True
         table.add_column("prompt", key="prompt", width=24)
+        table.add_column("tokens", key="tokens", width=8)
         table.add_column("tags", key="tags", width=22)
         table.add_column("uses", key="uses", width=6)
         table.add_column("feedback", key="feedback", width=8)
@@ -401,7 +405,13 @@ class PromptDeckTui(App[int]):
         except EditorError as exc:
             self._set_status(f"Editor failed: {exc}", severity="error", notify=True)
             return
-        self._copy_text(filled, row.name, detail="copy filled", filled=True)
+        self._copy_text(
+            filled,
+            row.name,
+            detail="copy filled",
+            filled=True,
+            token_status=token_summary(row.body, filled),
+        )
 
     def action_edit_selected(self) -> None:
         row = self._selected_row()
@@ -493,6 +503,7 @@ class PromptDeckTui(App[int]):
         for row in self._rows:
             table.add_row(
                 row.name,
+                str(row.token_count),
                 row.tag_label,
                 str(row.show_count),
                 str(row.feedback_count),
@@ -535,6 +546,7 @@ class PromptDeckTui(App[int]):
         metadata.add_column(style="bold")
         metadata.add_column()
         metadata.add_row("Project", row.project_label)
+        metadata.add_row("Tokens", str(row.token_count))
         metadata.add_row("Tags", row.tag_label)
         metadata.add_row("Variables", row.variable_label)
         metadata.add_row("Uses", str(row.show_count))
@@ -557,7 +569,15 @@ class PromptDeckTui(App[int]):
             return None
         return self._rows_by_name.get(self._selected_name)
 
-    def _copy_text(self, text: str, prompt_name: str, *, detail: str, filled: bool = False) -> None:
+    def _copy_text(
+        self,
+        text: str,
+        prompt_name: str,
+        *,
+        detail: str,
+        filled: bool = False,
+        token_status: str | None = None,
+    ) -> None:
         try:
             copied = self._clipboard.copy(text)
         except Exception as exc:
@@ -569,6 +589,8 @@ class PromptDeckTui(App[int]):
         self._store.record_usage(UsageAction.BROWSE, [prompt_name], detail=detail)
         self._reload(selected_name=prompt_name, update_status=False)
         message = "Copied filled prompt." if filled else "Copied prompt."
+        if token_status:
+            message = f"{message} {token_status}."
         self._set_status(f"{message} ({prompt_name})", notify=True)
 
     def _run_suspended(self, action: Callable[[], str]) -> str:

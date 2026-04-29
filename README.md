@@ -80,7 +80,14 @@ pdk browse
 pdk browse --plain
 ```
 
-`pdk list` prints a compact catalog table with prompt names, tags, use counts, edit counts, feedback counts, and last-used time. It intentionally omits prompt body previews so the list stays useful as an inventory.
+`pdk list` prints a compact catalog table with prompt names, token counts, tags, use counts, edit counts, feedback counts, and last-used time. It intentionally omits prompt body previews so the list stays useful as an inventory.
+
+Token counts use the `o200k_base` tokenizer. `pdk show NAME` keeps stdout clean for pipes and writes token stats to stderr instead. For prompts with variables, the stderr line includes both the template token count and the rendered token count after values are filled:
+
+```bash
+pdk show letter | pbcopy
+# stderr: tokens: template=42 rendered=118
+```
 
 `pdk browse` opens a fullscreen terminal UI when stdin/stdout are attached to a terminal. If it is run through pipes, captured output, or with `--plain`, it uses the original line-based browser.
 

@@ -8,6 +8,7 @@ from textual.widgets import DataTable, Static
 
 from pmpt.models import UsageAction
 from pmpt.store import PromptStore
+from pmpt.tokens import count_tokens, token_summary
 from pmpt.tui import (
     BrowserFilter,
     PromptDeckTui,
@@ -71,6 +72,7 @@ class TuiViewModelTest(unittest.TestCase):
         self.assertEqual(rows[0].show_count, 1)
         self.assertEqual(rows[0].feedback_count, 1)
         self.assertEqual(rows[0].tag_label, "#study")
+        self.assertEqual(rows[0].token_count, count_tokens("Explain {{topic}} clearly."))
 
     def test_tag_helpers_normalize_toggle_and_parse_operations(self):
         self.assertEqual(toggle_tag((), "Work"), ("work",))
@@ -167,5 +169,10 @@ class TuiPilotTest(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
 
             self.assertEqual(clipboard.values, ["Explain fractions clearly."])
-            self.assertEqual(app.query_one("#status", Static).content, "Copied filled prompt. (lesson)")
+            self.assertEqual(
+                app.query_one("#status", Static).content,
+                "Copied filled prompt. "
+                f"{token_summary('Explain {{topic}} clearly.', clipboard.values[0])}. "
+                "(lesson)",
+            )
             await pilot.press("q")

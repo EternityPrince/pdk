@@ -8,6 +8,7 @@ from typing import TextIO
 from .editor import TextEditor
 from .models import Prompt, TagSet, UsageAction
 from .store import PromptStore
+from .tokens import count_tokens, token_summary
 from .ui import ColorMode, ConsoleStyle, PromptFormatter
 from .variables import VariablePrompter
 
@@ -228,6 +229,7 @@ class InteractiveBrowser:
         self._line(f"created: {prompt.created_at}")
         self._line(f"updated: {prompt.updated_at}")
         self._line(f"project: {prompt.project_name or 'unbound'}")
+        self._line(f"tokens: {count_tokens(prompt.body)}")
         self._line(f"tags: {', '.join(prompt.tags) or '-'}")
         self._line("")
         self._stdout.write(prompt.body)
@@ -285,7 +287,12 @@ class InteractiveBrowser:
             copied = False
         if copied:
             self._store.record_usage(UsageAction.BROWSE, [prompt.name], detail="copy filled")
-            self._line(self._style.paint("Copied filled prompt to clipboard.", "green"))
+            self._line(
+                self._style.paint(
+                    f"Copied filled prompt to clipboard. {token_summary(prompt.body, filled)}.",
+                    "green",
+                )
+            )
         else:
             self._line(self._style.paint("Clipboard command is not available.", "yellow"))
 
