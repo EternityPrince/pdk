@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Iterable
 
-from .database import SQLiteDatabase, database_path, default_home
+from .database import SQLiteDatabase
 from .models import (
     Feedback,
     Note,
@@ -154,6 +154,29 @@ class PromptStore:
             event_id = self._record_usage(conn, action, prompt_names, detail=detail)
             if event_id is None:
                 conn.rollback()
+
+    def import_usage(
+        self,
+        action: UsageAction,
+        prompt_names: Iterable[str] = (),
+        *,
+        detail: str | None = None,
+        used_at: str,
+    ) -> None:
+        with self._db.connect() as conn:
+            names = list(dict.fromkeys(prompt_names))
+            for name in names:
+                if not self._prompt_exists(conn, name):
+                    raise PromptNotFoundError(name)
+            cursor = conn.execute(
+                "INSERT INTO usage_events (action, used_at, detail) VALUES (?, ?, ?)",
+                (action.value, used_at, detail),
+            )
+            event_id = int(cursor.lastrowid)
+            conn.executemany(
+                "INSERT INTO prompt_usage (event_id, prompt_name) VALUES (?, ?)",
+                [(event_id, name) for name in names],
+            )
 
     def _record_usage(
         self,
@@ -350,6 +373,21 @@ class PromptStore:
                 [(now, name) for name in names],
             )
 
+    def move_prompts(self, prompt_names: Iterable[str], project_name: str | None) -> None:
+        names = list(prompt_names)
+        now = self._db.now()
+        with self._db.connect() as conn:
+            project_id = self._project_id_for(conn, project_name) if project_name is not None else None
+            for name in names:
+                if not self._prompt_exists(conn, name):
+                    raise PromptNotFoundError(name)
+            conn.executemany(
+                "UPDATE prompts SET project_id = ?, updated_at = ? WHERE name = ?",
+                [(project_id, now, name) for name in names],
+            )
+            for name in names:
+                self._record_usage(conn, UsageAction.MOVE, [name], detail=project_name or "unbound")
+
     def add(
         self,
         name: str,
@@ -399,6 +437,42 @@ class PromptStore:
             self._apply_tags(conn, draft.name, draft.tags)
             self._record_usage(conn, UsageAction.ADD, [draft.name])
 
+    def import_prompt(
+        self,
+        name: str,
+        body: str,
+        *,
+        tags: Iterable[str] = (),
+        project_id: int | None = None,
+        created_at: str,
+        updated_at: str,
+        replace: bool = False,
+    ) -> None:
+        draft = PromptDraft(name=name, body=body, replace=replace, tags=tags, project_id=project_id)
+        with self._db.connect() as conn:
+            exists = self._prompt_exists(conn, draft.name)
+            if exists and not draft.replace:
+                raise PromptExistsError(draft.name)
+            if exists:
+                conn.execute(
+                    """
+                    UPDATE prompts
+                    SET body = ?, updated_at = ?, project_id = ?
+                    WHERE name = ?
+                    """,
+                    (draft.body, updated_at, draft.project_id, draft.name),
+                )
+                conn.execute("DELETE FROM prompt_tags WHERE prompt_name = ?", (draft.name,))
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO prompts (name, body, created_at, updated_at, project_id)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (draft.name, draft.body, created_at, updated_at, draft.project_id),
+                )
+            self._apply_tags(conn, draft.name, draft.tags)
+
     def update(self, name: str, body: str) -> None:
         now = self._db.now()
         with self._db.connect() as conn:
@@ -417,6 +491,36 @@ class PromptStore:
             if result.rowcount == 0:
                 raise PromptNotFoundError(name)
             self._record_usage(conn, UsageAction.EDIT, [name])
+
+    def rename_prompt(self, old_name: str, new_name: str) -> None:
+        draft = PromptDraft(name=new_name, body="")
+        now = self._db.now()
+        with self._db.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT body, created_at, project_id
+                FROM prompts
+                WHERE name = ?
+                """,
+                (old_name,),
+            ).fetchone()
+            if row is None:
+                raise PromptNotFoundError(old_name)
+            if self._prompt_exists(conn, draft.name):
+                raise PromptExistsError(draft.name)
+            conn.execute(
+                """
+                INSERT INTO prompts (name, body, created_at, updated_at, project_id)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (draft.name, row["body"], row["created_at"], now, row["project_id"]),
+            )
+            conn.execute("UPDATE prompt_tags SET prompt_name = ? WHERE prompt_name = ?", (draft.name, old_name))
+            conn.execute("UPDATE prompt_usage SET prompt_name = ? WHERE prompt_name = ?", (draft.name, old_name))
+            conn.execute("UPDATE prompt_versions SET prompt_name = ? WHERE prompt_name = ?", (draft.name, old_name))
+            conn.execute("UPDATE feedback SET prompt_name = ? WHERE prompt_name = ?", (draft.name, old_name))
+            conn.execute("DELETE FROM prompts WHERE name = ?", (old_name,))
+            self._record_usage(conn, UsageAction.RENAME, [draft.name], detail=old_name)
 
     def get(self, name: str) -> Prompt:
         with self._db.connect() as conn:
@@ -462,11 +566,7 @@ class PromptStore:
             prompts = [self._prompt_from_row(conn, row) for row in rows]
 
         if wanted_tags:
-            prompts = [
-                prompt
-                for prompt in prompts
-                if wanted_tags.issubset(set(prompt.tags))
-            ]
+            prompts = [prompt for prompt in prompts if wanted_tags.issubset(set(prompt.tags))]
         if query_text:
             prompts = [
                 prompt
@@ -711,6 +811,18 @@ class PromptStore:
             )
             self._record_usage(conn, UsageAction.FEEDBACK, [name])
 
+    def import_feedback(self, name: str, body: str, created_at: str) -> None:
+        with self._db.connect() as conn:
+            if not self._prompt_exists(conn, name):
+                raise PromptNotFoundError(name)
+            conn.execute(
+                """
+                INSERT INTO feedback (prompt_name, body, created_at)
+                VALUES (?, ?, ?)
+                """,
+                (name, body, created_at),
+            )
+
     def feedback(self, name: str) -> list[Feedback]:
         with self._db.connect() as conn:
             if not self._prompt_exists(conn, name):
@@ -733,6 +845,24 @@ class PromptStore:
             )
             for row in rows
         ]
+
+    def import_prompt_version(
+        self,
+        name: str,
+        body: str,
+        reason: VersionReason,
+        created_at: str,
+    ) -> None:
+        with self._db.connect() as conn:
+            if not self._prompt_exists(conn, name):
+                raise PromptNotFoundError(name)
+            conn.execute(
+                """
+                INSERT INTO prompt_versions (prompt_name, body, created_at, reason)
+                VALUES (?, ?, ?, ?)
+                """,
+                (name, body, created_at, reason.value),
+            )
 
     def add_note(self, body: str, *, title: str | None = None, project_id: int | None = None) -> Note:
         draft = NoteDraft(body=body, title=title, project_id=project_id)
@@ -820,6 +950,25 @@ class PromptStore:
                 WHERE id = ?
                 """,
                 (title, body, now, note_id),
+            )
+
+    def import_note_version(
+        self,
+        note_id: int,
+        body: str,
+        *,
+        title: str | None,
+        created_at: str,
+    ) -> None:
+        with self._db.connect() as conn:
+            if conn.execute("SELECT 1 FROM notes WHERE id = ?", (note_id,)).fetchone() is None:
+                raise NoteNotFoundError(str(note_id))
+            conn.execute(
+                """
+                INSERT INTO note_versions (note_id, title, body, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (note_id, title, body, created_at),
             )
 
     def note_versions(self, note_id: int) -> list[NoteVersion]:

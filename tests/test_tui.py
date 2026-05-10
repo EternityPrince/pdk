@@ -6,11 +6,12 @@ from pathlib import Path
 
 from textual.widgets import DataTable, Static
 
-from pmpt.models import UsageAction
-from pmpt.store import PromptStore
-from pmpt.tokens import count_tokens, token_summary
-from pmpt.tui import (
+from pdk.models import UsageAction
+from pdk.store import PromptStore
+from pdk.tokens import count_tokens, token_summary
+from pdk.tui import (
     BrowserFilter,
+    BrowserSort,
     PromptDeckTui,
     build_browser_rows,
     parse_tag_operations,
@@ -82,6 +83,22 @@ class TuiViewModelTest(unittest.TestCase):
             (("work", "review"), ("draft",)),
         )
 
+    def test_view_model_filters_by_variable_and_sorts(self):
+        store = self.store()
+        store.add("short", "Hello {{name}}")
+        store.add("long", "Hello {{name}} with much more surrounding text")
+        store.add("plain", "No variables")
+        store.record_usage(UsageAction.SHOW, ["short"])
+
+        by_variable = build_browser_rows(store, BrowserFilter(variable="name"))
+        self.assertEqual([row.name for row in by_variable], ["long", "short"])
+
+        by_tokens = build_browser_rows(store, BrowserFilter(variable="name"), sort=BrowserSort.TOKENS)
+        self.assertEqual([row.name for row in by_tokens], ["long", "short"])
+
+        by_uses = build_browser_rows(store, BrowserFilter(variable="name"), sort=BrowserSort.USES)
+        self.assertEqual([row.name for row in by_uses], ["short", "long"])
+
 
 class TuiPilotTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
@@ -134,6 +151,24 @@ class TuiPilotTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(table.row_count, 2)
             await pilot.press("q")
 
+    async def test_variable_filter_submitted_in_search_filters_table(self):
+        store = self.store()
+        store.add("letter", "Hello {{name}}.", tags=["writing"])
+        store.add("plain", "No variables.", tags=["writing"])
+        app = PromptDeckTui(store, FakeEditor(""), clipboard=FakeClipboard())
+
+        async with app.run_test(size=(110, 32), notifications=True) as pilot:
+            await pilot.pause()
+            table = app.query_one("#prompt-table", DataTable)
+
+            await pilot.press("?", "n", "a", "m", "e", "enter")
+            await pilot.pause()
+
+            self.assertEqual(table.row_count, 1)
+            self.assertEqual(app._selected_name, "letter")
+            self.assertEqual(app._filter.variable, "name")
+            await pilot.press("q")
+
     async def test_copy_selected_prompt_from_table(self):
         store = self.store()
         store.add("lesson", "Explain fractions clearly.", tags=["study"])
@@ -149,6 +184,51 @@ class TuiPilotTest(unittest.IsolatedAsyncioTestCase):
 
             self.assertEqual(clipboard.values, ["Explain fractions clearly."])
             self.assertEqual(app.query_one("#status", Static).content, "Copied prompt. (lesson)")
+            await pilot.press("q")
+
+    async def test_copy_context_uses_current_filtered_rows(self):
+        store = self.store()
+        store.add("lesson", "Explain fractions clearly.", tags=["study"])
+        store.add("work", "Draft an update.", tags=["job"])
+        store.add_feedback("lesson", "Too dry.")
+        clipboard = FakeClipboard()
+        app = PromptDeckTui(store, FakeEditor(""), clipboard=clipboard)
+
+        async with app.run_test(size=(110, 32), notifications=True) as pilot:
+            await pilot.pause()
+            await pilot.press("#", "s", "t", "u", "d", "y", "enter")
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("x")
+            await pilot.pause()
+
+            self.assertEqual(len(clipboard.values), 1)
+            self.assertIn("# Prompt Deck Context", clipboard.values[0])
+            self.assertIn("### lesson", clipboard.values[0])
+            self.assertIn("Too dry.", clipboard.values[0])
+            self.assertNotIn("### work", clipboard.values[0])
+            self.assertEqual(app.query_one("#status", Static).content, "Copied context for 1 prompt(s).")
+            await pilot.press("q")
+
+    async def test_sort_binding_cycles_prompt_rows(self):
+        store = self.store()
+        store.add("short", "tiny")
+        store.add("long", "This prompt has more tokens than the short one.")
+        app = PromptDeckTui(store, FakeEditor(""), clipboard=FakeClipboard())
+
+        async with app.run_test(size=(110, 32), notifications=True) as pilot:
+            await pilot.pause()
+            self.assertEqual([row.name for row in app._rows], ["long", "short"])
+
+            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("s")
+            await pilot.pause()
+
+            self.assertEqual(app._sort, BrowserSort.TOKENS)
+            self.assertEqual([row.name for row in app._rows], ["long", "short"])
+            self.assertEqual(app.query_one("#status", Static).content, "Sort: tokens.")
             await pilot.press("q")
 
     async def test_fill_and_copy_selected_prompt(self):
@@ -171,8 +251,6 @@ class TuiPilotTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(clipboard.values, ["Explain fractions clearly."])
             self.assertEqual(
                 app.query_one("#status", Static).content,
-                "Copied filled prompt. "
-                f"{token_summary('Explain {{topic}} clearly.', clipboard.values[0])}. "
-                "(lesson)",
+                f"Copied filled prompt. {token_summary('Explain {{topic}} clearly.', clipboard.values[0])}. (lesson)",
             )
             await pilot.press("q")

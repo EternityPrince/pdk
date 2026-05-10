@@ -2,7 +2,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from pmpt.models import PromptDraft, TagSet
+from pdk.models import PromptDraft, TagSet
 
 
 class ModelsTest(unittest.TestCase):

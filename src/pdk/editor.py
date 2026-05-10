@@ -54,11 +54,14 @@ class TextEditor:
     def _run(self, path: Path) -> int:
         command = [*self._command, str(path)]
         try:
-            with open("/dev/tty", "r", encoding="utf-8") as tty_in, open(
-                "/dev/tty",
-                "w",
-                encoding="utf-8",
-            ) as tty_out:
+            with (
+                open("/dev/tty", "r", encoding="utf-8") as tty_in,
+                open(
+                    "/dev/tty",
+                    "w",
+                    encoding="utf-8",
+                ) as tty_out,
+            ):
                 result = subprocess.run(
                     command,
                     stdin=tty_in,

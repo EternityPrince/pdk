@@ -10,6 +10,21 @@ pdk add review --tag work --tag review
 pdk add review --replace < new_review_prompt.txt
 pdk edit review
 pdk show review | pbcopy
+pdk scan
+pdk scan docs/
+pdk index docs/
+pdk digest
+pdk digest --generate
+pdk check
+pdk check --show-spans
+pdk check --profile client_a
+pdk check --stdin < draft.md
+pdk redact --stdin < draft.md
+pdk privacy init
+pdk clip review
+pdk use review
+pdk browse --fzf
+pdk completions zsh > ~/.zfunc/_pdk
 ```
 
 Project-local prompts:
@@ -58,6 +73,14 @@ pdk export
 pdk context client-a > context.md
 pdk export --all
 pdk export --no-project
+pdk export --format json --output deck.json
+pdk export --redact > safe-context.md
+pdk import deck.json
+pdk import context.md --format markdown
+pdk import deck.json --dry-run
+pdk security status
+PDK_PASSPHRASE='...' pdk security lock
+PDK_PASSPHRASE='...' pdk security unlock
 ```
 
 Useful navigation and history commands:
@@ -70,6 +93,12 @@ pdk tag add review work important
 pdk tag rm review important
 pdk stats
 pdk usage
+pdk doctor
+pdk duplicates
+pdk stale --days 30
+pdk rename old-name new-name
+pdk move review --project client-a
+pdk move shared-template --no-project
 pdk versions review
 pdk versions review --show 1
 pdk versions review --prune --yes
@@ -82,7 +111,114 @@ pdk browse --plain
 
 `pdk list` prints a compact catalog table with prompt names, token counts, tags, use counts, edit counts, feedback counts, and last-used time. It intentionally omits prompt body previews so the list stays useful as an inventory.
 
-Token counts use the `o200k_base` tokenizer. `pdk show NAME` keeps stdout clean for pipes and writes token stats to stderr instead. For prompts with variables, the stderr line includes both the template token count and the rendered token count after values are filled:
+Token counts use the `o200k_base` tokenizer. `pdk scan` is the easiest privacy entry point: with no arguments it scans the clipboard, and with files or folders it scans those sources and prints a compact table of findings, tokens, lines, characters, and detected private-data types.
+
+```bash
+pdk scan
+pdk scan draft.md notes.docx book.epub
+pdk scan docs/
+pdk scan --details --profile client_a docs/
+```
+
+`pdk check` prints detailed stats for one source. It reads the clipboard by default and prints token count plus text stats such as characters, bytes, lines, words, and private-data warnings. Use `--show-spans` to list detected private-data spans without printing the raw private values. You can pass a file directly, or use `--stdin`/`--file` when you want to be explicit.
+
+```bash
+pdk check
+pdk check draft.md
+pdk check --show-spans
+```
+
+`pdk redact` is the quick replacement command. With no arguments it reads the clipboard and writes redacted text to stdout; with a file it redacts that file's extracted text.
+
+```bash
+pdk redact
+pdk redact draft.md
+pdk redact --mode mask --stdin < draft.md
+```
+
+File scanning reads plain text-like files and DOCX directly. PDF and EPUB extraction use higher-quality optional readers:
+
+```bash
+pip install 'prompt-deck[files]'
+pdk scan report.pdf book.epub
+```
+
+For reusable document work, `pdk index` stores extracted file metadata, chunks, privacy findings, entities, and summaries in a global SQLite database:
+
+```bash
+pdk index docs/
+pdk files
+pdk file show 1
+pdk file entities 1
+pdk digest 1
+pdk digest 1 --generate
+```
+
+The file index lives in the Prompt Deck application support directory as `index.sqlite3`. Files are tracked by path, size, mtime, SHA-256, extractor version, chunks, token counts, privacy findings, aggregated entities, and summaries. `pdk digest` stores a fast extractive summary by default. Use `--generate` to run a local Gemma 3 4B summary model through MLX:
+
+```bash
+pip install 'prompt-deck[summary]'
+pdk digest 1 --generate
+```
+
+The default summary model is `mlx-community/gemma-3-text-4b-it-4bit`, an MLX 4-bit conversion for text generation. The original Google model is `google/gemma-3-4b-it`; Google describes Gemma 3 4B as instruction-tuned, multilingual, and suitable for summarization with a 128K token context window for 4B models.
+
+Private-data detection is regex-based by default and can be customized in one global `privacy.toml`. You do not need to initialize a folder to use it:
+
+```bash
+pdk privacy init
+pdk privacy path
+pdk privacy list
+pdk privacy profiles
+pdk privacy model
+pdk redact --stdin < draft.md
+```
+
+Top-level patterns apply everywhere. Profiles let you keep project-specific rules in the same global config and opt into them with `--profile` or `--project`:
+
+```toml
+[[patterns]]
+name = "contract_number"
+label = "Contract number"
+regex = "\\bcontract-[0-9]{4,}\\b"
+score = 0.7
+ignore_case = true
+
+[profiles.client_a]
+disabled = []
+
+[[profiles.client_a.patterns]]
+name = "client_ticket"
+label = "Client A ticket"
+regex = "\\bCA-[0-9]{5,}\\b"
+score = 0.75
+```
+
+Optional ML entity recognition can be enabled per command, or in the global config:
+
+```bash
+pdk check --model --show-spans
+pdk redact --model --stdin < draft.md
+pdk check --model --model-threshold 0.75 --stdin < draft.md
+```
+
+```toml
+[model]
+enabled = false
+backend = "transformers"
+model = "Gherman/bert-base-NER-Russian"
+threshold = 0.6
+```
+
+The default ML backend is a Hugging Face `transformers` token-classification pipeline using `Gherman/bert-base-NER-Russian`, a Russian NER model. Install the optional dependencies before using `--model`:
+
+```bash
+pip install 'prompt-deck[ml]'
+```
+
+Regex detection remains the first pass. The ML detector adds span-based findings for entities such as people, organizations, and locations, and overlapping findings keep the higher-confidence match.
+
+`pdk show NAME` keeps stdout clean for pipes and writes token stats to stderr instead. For prompts with variables, the stderr line includes both the template token count and the rendered token count after values are filled:
 
 ```bash
 pdk show letter | pbcopy
@@ -99,9 +235,11 @@ Inside fullscreen `pdk browse`:
 Esc         clear search text
 Enter/c     copy the selected prompt
 f           fill variables in $EDITOR, then copy
+x           copy the current filtered list as Markdown context
 e           edit prompt in $EDITOR
 t           add/remove tags with +tag and -tag
 v           show previous versions
+s           cycle sort by name, tokens, uses, updated
 ?           show help
 q           quit
 ```

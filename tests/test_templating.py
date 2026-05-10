@@ -1,6 +1,6 @@
 import unittest
 
-from pmpt.templating import find_variables, render_template
+from pdk.templating import find_variables, render_template
 
 
 class TemplatingTest(unittest.TestCase):

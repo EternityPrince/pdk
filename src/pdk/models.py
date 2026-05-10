@@ -18,6 +18,8 @@ class UsageAction(StrEnum):
     BROWSE = "browse"
     EDIT = "edit"
     FEEDBACK = "feedback"
+    MOVE = "move"
+    RENAME = "rename"
     REPLACE = "replace"
     SHOW = "show"
     TAG = "tag"

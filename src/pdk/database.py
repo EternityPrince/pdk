@@ -7,11 +7,14 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .security import require_plain_database
+
 
 class SQLiteDatabase:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or self.default_path()
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        require_plain_database(self.path)
         self.initialize()
 
     @staticmethod
@@ -80,12 +83,11 @@ class SQLiteDatabase:
                 )
                 """
             )
-            columns = {
-                row["name"]
-                for row in conn.execute("PRAGMA table_info(prompts)").fetchall()
-            }
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(prompts)").fetchall()}
             if "project_id" not in columns:
-                conn.execute("ALTER TABLE prompts ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL")
+                conn.execute(
+                    "ALTER TABLE prompts ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL"
+                )
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS tags (

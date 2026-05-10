@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Protocol
 
 from rich.console import Group
@@ -25,14 +26,21 @@ from .variables import VariablePrompter
 
 
 class ClipboardAdapter(Protocol):
-    def copy(self, text: str) -> bool:
-        ...
+    def copy(self, text: str) -> bool: ...
 
 
 @dataclass(frozen=True)
 class BrowserFilter:
     query: str | None = None
     tags: tuple[str, ...] = ()
+    variable: str | None = None
+
+
+class BrowserSort(StrEnum):
+    NAME = "name"
+    TOKENS = "tokens"
+    USES = "uses"
+    UPDATED = "updated"
 
 
 @dataclass(frozen=True)
@@ -105,6 +113,7 @@ def build_browser_rows(
     *,
     project_id: int | None = None,
     project_filter: bool = False,
+    sort: BrowserSort = BrowserSort.NAME,
 ) -> list[PromptBrowserRow]:
     prompts = store.list(
         tags=browser_filter.tags,
@@ -112,11 +121,22 @@ def build_browser_rows(
         project_id=project_id,
         project_filter=project_filter,
     )
-    stats_by_name = {
-        stats.name: stats
-        for stats in store.stats(project_id=project_id, project_filter=project_filter)
-    }
-    return [row_from_prompt(prompt, stats_by_name.get(prompt.name)) for prompt in prompts]
+    stats_by_name = {stats.name: stats for stats in store.stats(project_id=project_id, project_filter=project_filter)}
+    rows = [row_from_prompt(prompt, stats_by_name.get(prompt.name)) for prompt in prompts]
+    if browser_filter.variable:
+        variable = browser_filter.variable.casefold()
+        rows = [row for row in rows if any(variable in item.casefold() for item in row.variables)]
+    return sort_browser_rows(rows, sort)
+
+
+def sort_browser_rows(rows: list[PromptBrowserRow], sort: BrowserSort) -> list[PromptBrowserRow]:
+    if sort == BrowserSort.TOKENS:
+        return sorted(rows, key=lambda row: (-row.token_count, row.name.casefold()))
+    if sort == BrowserSort.USES:
+        return sorted(rows, key=lambda row: (-row.show_count, row.name.casefold()))
+    if sort == BrowserSort.UPDATED:
+        return sorted(rows, key=lambda row: (row.prompt.updated_at, row.name.casefold()), reverse=True)
+    return sorted(rows, key=lambda row: row.name.casefold())
 
 
 def row_from_prompt(prompt: Prompt, stats: PromptStats | None = None) -> PromptBrowserRow:
@@ -200,8 +220,7 @@ class TagEditModal(ModalScreen[str | None]):
         current = " ".join(f"#{tag}" for tag in self._current_tags) or "-"
         with Vertical(id="tag-panel"):
             yield Static(
-                f"[b]{self._prompt_name}[/b]\nCurrent tags: {current}\n"
-                "Enter +tag to add and -tag to remove.",
+                f"[b]{self._prompt_name}[/b]\nCurrent tags: {current}\nEnter +tag to add and -tag to remove.",
                 id="tag-help",
             )
             yield Input(placeholder="+work -draft", id="tag-input")
@@ -270,9 +289,11 @@ class PromptDeckTui(App[int]):
         Binding("escape", "clear_search", "Clear"),
         Binding("c", "copy_selected", "Copy"),
         Binding("f", "fill_copy_selected", "Fill+Copy"),
+        Binding("x", "copy_context", "Context"),
         Binding("e", "edit_selected", "Edit"),
         Binding("t", "edit_tags", "Tags"),
         Binding("v", "show_versions", "Versions"),
+        Binding("s", "cycle_sort", "Sort"),
         Binding("question_mark", "show_help", "Help"),
         Binding("q", "quit", "Quit"),
     ]
@@ -298,13 +319,14 @@ class PromptDeckTui(App[int]):
         self._rows: list[PromptBrowserRow] = []
         self._rows_by_name: dict[str, PromptBrowserRow] = {}
         self._selected_name: str | None = None
+        self._sort = BrowserSort.NAME
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
         with Vertical(id="topbar"):
             yield Input(
                 value=self._filter.query or "",
-                placeholder="Search prompts, or submit #tag to toggle a tag filter",
+                placeholder="Search prompts, submit #tag for tags, or ?variable for variables",
                 id="search",
             )
             yield Static("", id="filters")
@@ -334,10 +356,13 @@ class PromptDeckTui(App[int]):
         if value.startswith("#"):
             self._set_status(f"Press Enter to toggle {value}")
             return
+        if value.startswith("?"):
+            self._set_status(f"Press Enter to filter variable {value}")
+            return
         query = value or None
         if query == self._filter.query:
             return
-        self._filter = BrowserFilter(query=query, tags=self._filter.tags)
+        self._filter = BrowserFilter(query=query, tags=self._filter.tags, variable=self._filter.variable)
         self._reload()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -349,7 +374,14 @@ class PromptDeckTui(App[int]):
             self._filter = BrowserFilter(
                 query=None,
                 tags=toggle_tag(self._filter.tags, value[1:]),
+                variable=self._filter.variable,
             )
+            event.input.value = ""
+            self._reload()
+            return
+        if value.startswith("?"):
+            variable = value[1:].strip() or None
+            self._filter = BrowserFilter(query=None, tags=self._filter.tags, variable=variable)
             event.input.value = ""
             self._reload()
             return
@@ -387,6 +419,24 @@ class PromptDeckTui(App[int]):
             self._set_status("No prompt selected.", severity="warning")
             return
         self._copy_text(row.body, row.name, detail="copy")
+
+    def action_copy_context(self) -> None:
+        if not self._rows:
+            self._set_status("No prompts to copy as context.", severity="warning")
+            return
+        text = self._context_markdown()
+        prompt_names = [row.name for row in self._rows]
+        try:
+            copied = self._clipboard.copy(text)
+        except Exception as exc:
+            self._set_status(f"Clipboard failed: {exc}", severity="error", notify=True)
+            return
+        if not copied:
+            self._set_status("Clipboard command is not available.", severity="warning", notify=True)
+            return
+        self._store.record_usage(UsageAction.BROWSE, prompt_names, detail="copy context")
+        self._reload(selected_name=self._selected_name, update_status=False)
+        self._set_status(f"Copied context for {len(prompt_names)} prompt(s).", notify=True)
 
     def action_fill_copy_selected(self) -> None:
         row = self._selected_row()
@@ -461,11 +511,22 @@ class PromptDeckTui(App[int]):
             await self.push_screen_wait(TextModal("Previous versions", "No previous versions."))
             return
         body = "\n\n".join(
-            f"**{version.id}**  {version.created_at}  `{version.reason}`\n\n"
-            f"{preview_text(version.body, 240)}"
+            f"**{version.id}**  {version.created_at}  `{version.reason}`\n\n{preview_text(version.body, 240)}"
             for version in versions[:12]
         )
         await self.push_screen_wait(TextModal(f"Previous versions: {row.name}", body))
+
+    def action_cycle_sort(self) -> None:
+        order = (
+            BrowserSort.NAME,
+            BrowserSort.TOKENS,
+            BrowserSort.USES,
+            BrowserSort.UPDATED,
+        )
+        index = order.index(self._sort)
+        self._sort = order[(index + 1) % len(order)]
+        self._reload(selected_name=self._selected_name, update_status=False)
+        self._set_status(f"Sort: {self._sort}.")
 
     async def action_show_help(self) -> None:
         await self.push_screen_wait(
@@ -478,9 +539,12 @@ class PromptDeckTui(App[int]):
                         "`Esc` clears search text",
                         "`Enter` or `c` copies the selected prompt",
                         "`f` fills variables in $EDITOR, then copies",
+                        "`x` copies the current filtered prompt list as Markdown context",
                         "`e` edits the selected prompt in $EDITOR",
                         "`t` edits tags with +tag and -tag",
                         "`v` shows previous versions",
+                        "`s` cycles sort by name, tokens, uses, updated",
+                        "`?name` + Enter filters prompts by variable name",
                         "`q` quits",
                     ]
                 ),
@@ -496,6 +560,7 @@ class PromptDeckTui(App[int]):
             self._filter,
             project_id=self._project_id,
             project_filter=self._project_filter,
+            sort=self._sort,
         )
         self._rows_by_name = {row.name: row for row in self._rows}
         table = self.query_one("#prompt-table", DataTable)
@@ -526,8 +591,9 @@ class PromptDeckTui(App[int]):
     def _render_filters(self) -> None:
         query = self._filter.query or "-"
         tags = " ".join(f"#{tag}" for tag in self._filter.tags) or "-"
+        variable = self._filter.variable or "-"
         self.query_one("#filters", Static).update(
-            f"query: {query}   tags: {tags}   submit #tag to toggle filters"
+            f"query: {query}   tags: {tags}   variable: {variable}   sort: {self._sort}"
         )
 
     def _render_detail(self) -> None:
@@ -557,12 +623,54 @@ class PromptDeckTui(App[int]):
 
         title = Text(row.name, style="bold magenta")
         body = row.body if row.body.strip() else "_Empty prompt_"
+        comments = self._store.feedback(row.name)[:5]
+        comments_table = Table.grid(padding=(0, 1))
+        comments_table.add_column(style="bold")
+        comments_table.add_column()
+        if comments:
+            for item in comments:
+                comments_table.add_row(short_timestamp(item.created_at), preview_text(item.body, 120))
+        else:
+            comments_table.add_row("-", "No comments")
         detail.update(
             Group(
                 Panel(metadata, title=title),
-                Markdown(body),
+                Panel(Markdown(body), title="Preview"),
+                Panel(comments_table, title="Comments"),
             )
         )
+
+    def _context_markdown(self) -> str:
+        lines = ["# Prompt Deck Context", ""]
+        lines.append("## Filters")
+        lines.append("")
+        lines.append(f"- query: {self._filter.query or '-'}")
+        lines.append(f"- tags: {', '.join(self._filter.tags) or '-'}")
+        lines.append(f"- variable: {self._filter.variable or '-'}")
+        lines.append(f"- sort: {self._sort}")
+        lines.append("")
+        lines.append("## Prompts")
+        lines.append("")
+        for row in self._rows:
+            lines.append(f"### {row.name}")
+            lines.append("")
+            lines.append(f"- project: {row.project_label}")
+            lines.append(f"- tags: {', '.join(row.prompt.tags) or '-'}")
+            lines.append(f"- tokens: {row.token_count}")
+            lines.append(f"- variables: {row.variable_label}")
+            lines.append("")
+            lines.append("```text")
+            lines.append(row.body)
+            lines.append("```")
+            comments = self._store.feedback(row.name)[:5]
+            if comments:
+                lines.append("")
+                lines.append("#### Comments")
+                lines.append("")
+                for item in comments:
+                    lines.append(f"- {item.created_at}: {item.body}")
+            lines.append("")
+        return "\n".join(lines)
 
     def _selected_row(self) -> PromptBrowserRow | None:
         if self._selected_name is None:

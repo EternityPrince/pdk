@@ -54,9 +54,7 @@ class PromptFormatter:
 
     def prompt_row(self, prompt: Prompt) -> str:
         return (
-            f"{self._style.paint(prompt.name, 'bold', 'magenta')}\t"
-            f"{self.preview(prompt.body)}"
-            f"{self.tag_text(prompt)}\n"
+            f"{self._style.paint(prompt.name, 'bold', 'magenta')}\t{self.preview(prompt.body)}{self.tag_text(prompt)}\n"
         )
 
     def browser_row(self, index: int, prompt: Prompt) -> str:
