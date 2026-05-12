@@ -14,6 +14,7 @@ from .file_workflows import index_paths
 from .interactive import Clipboard
 from .project import ProjectNotFoundError, ProjectResolver
 from .session_config import SessionConfig, load_session_config, write_starter_session_config
+from .session_state import load_session_state, save_session_state
 from .tokens import count_tokens
 
 
@@ -26,8 +27,6 @@ STARTER_FILES = {
     "study/learning.md": "# Learning\n\n",
     "work/projects.md": "# Projects\n\n",
 }
-
-
 class _EmptyStore:
     def list(self, **kwargs):
         return []
@@ -54,6 +53,15 @@ def _session_path(project_root: Path, value: str | None) -> Path:
         return project_root / "context"
     path = Path(value).expanduser()
     return path if path.is_absolute() else project_root / path
+
+
+def _ensure_state_gitignore(project_root: Path) -> None:
+    gitignore = project_root / ".pdk" / ".gitignore"
+    existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
+    lines = existing.splitlines()
+    if "session.md" not in lines:
+        suffix = "" if existing.endswith("\n") or not existing else "\n"
+        gitignore.write_text(existing + suffix + "session.md\n", encoding="utf-8")
 
 
 def _display_path(path: Path, project_root: Path) -> str:
@@ -125,17 +133,13 @@ def _selected_modules(
 
 
 def _render_session_markdown(
-    args: argparse.Namespace,
     document: ContextDocument,
     modules: tuple[ContextModule, ...],
 ) -> str:
     context_markdown = (
         render_context_compact_markdown(document) if document.options.compact else render_context_markdown(document)
     ).rstrip()
-    lines = ["# Prompt Deck Session", ""]
-    if args.question:
-        lines.extend(["## Question", "", args.question, ""])
-    lines.extend(["## Included Modules", ""])
+    lines = ["# Prompt Deck Session", "", "## Included Modules", ""]
     lines.extend(f"- {module.name}" for module in modules)
     lines.extend(["", "## Context", "", context_markdown, ""])
     return "\n".join(lines)
@@ -181,8 +185,15 @@ def cmd_session_init(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, st
             path.write_text(body, encoding="utf-8")
 
     config_path = write_starter_session_config(context.project_root, base_dir=_display_path(root, context.project_root))
+    _ensure_state_gitignore(context.project_root)
     _reporter(args, stderr).success(f"Initialized session context at {_display_path(root, context.project_root)}")
     _reporter(args, stderr).success(f"Updated session config {config_path}")
+    return 0
+
+
+def cmd_session_show(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
+    project_root = _project_root_or_error()
+    stdout.write(load_session_state(project_root))
     return 0
 
 
@@ -267,7 +278,7 @@ def cmd_session_build(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, s
         document = _redact_document(document)
     else:
         _warn_context_secrets(args, document, stderr)
-    rendered = _render_session_markdown(args, document, modules)
+    rendered = _render_session_markdown(document, modules)
     tokens = count_tokens(rendered)
     _warn_budget(args, stderr, tokens=tokens, budget=options.budget)
 
@@ -281,11 +292,14 @@ def cmd_session_build(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, s
             raise CliError("clipboard command failed") from exc
         if not copied:
             raise CliError("clipboard command is not available")
+        save_session_state(project_root, rendered)
         _reporter(args, stderr).success(f"Copied session to clipboard ({tokens} tokens)")
         return 0
     if args.output:
         Path(args.output).expanduser().write_text(rendered, encoding="utf-8")
+        save_session_state(project_root, rendered)
         _reporter(args, stderr).success(f"Wrote session {args.output}")
         return 0
+    save_session_state(project_root, rendered)
     stdout.write(rendered)
     return 0

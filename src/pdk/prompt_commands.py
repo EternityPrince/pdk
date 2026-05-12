@@ -24,6 +24,7 @@ from .file_index import FileIndex
 from .interactive import Clipboard, InteractiveBrowser
 from .models import Prompt, PromptStats, UsageAction
 from .prompt_hygiene import duplicate_groups, stale_prompts
+from .session_state import load_session_state
 from .store import PromptExistsError, PromptStore
 from .tokens import count_tokens
 from .ui import ConsoleStyle, PromptFormatter
@@ -60,6 +61,11 @@ def cmd_show(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: Te
     store = _store(args)
     prompt = store.get(args.name)
     rendered = _fill_variables(args, prompt.body, stdin, stderr)
+    if getattr(args, "context", False):
+        context = _context(args)
+        if context.project_root is None:
+            raise CliError("session context requires a project; run `pdk session build MODULE` first")
+        rendered = rendered.rstrip() + "\n\n---\n\n" + load_session_state(context.project_root)
     stdout.write(rendered)
     _write_token_summary(prompt.body, rendered, stdout, stderr)
     store.record_usage(UsageAction.SHOW, [args.name])

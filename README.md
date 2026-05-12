@@ -13,8 +13,9 @@ pdk add review --tag refactor < review.md
 pdk project init
 pdk session init
 pdk session list
-pdk session build sport -q "Подбери 20-минутную тренировку после зала" --copy
-pdk session build food sport -q "Оцени завтрак с учетом тренировок" --copy
+pdk session build sport
+pdk list
+pdk show workout --context
 pdk session build all --dry-run
 pdk audio --module work --heading "Inbox"
 pdk context client-a
@@ -26,8 +27,8 @@ pdk export --format json --output backup.json
 ## Session context from Markdown folders
 
 `pdk session` is the fast path for a common AI workflow: keep long-lived personal
-or project context in thematic Markdown folders, then build one AI-ready prompt
-for a specific question.
+or project context in thematic Markdown folders, build the relevant context once,
+then attach it to any prompt with `pdk show NAME --context`.
 
 Write durable facts in `context/base` and topic folders:
 
@@ -56,15 +57,21 @@ you intentionally want the previously indexed content.
 ```bash
 pdk session init
 pdk session list
-pdk session build sport -q "Подбери 20-минутную тренировку после зала" --copy
-pdk session build food sport -q "Оцени завтрак с учетом тренировок" --copy
+pdk session build sport
+pdk session show
+pdk list
+pdk show workout --context
 pdk session build all --dry-run
 ```
 
-`--copy` puts the final Markdown in your clipboard. Use `--dry-run` to see
-modules, files, token estimate, and budget status without printing full file
+`session build` saves the last built context in project state, and also prints it
+to stdout unless you use `--copy` or `--output`. `pdk session show` prints that
+saved context later. `pdk show NAME --context` first fills the prompt
+placeholders, then appends the saved session context after it. Use `--dry-run` to
+see modules, files, token estimate, and budget status without printing full file
 text. Use `--budget 12000` to warn when the package is too large, and `--redact`
-to mask emails, phone numbers, and other configured private data before copying.
+to mask emails, phone numbers, and other configured private data before saving or
+copying.
 
 Session settings live in project-local `.pdk/context.toml`:
 
@@ -89,9 +96,9 @@ depends_on = ["base"]
 
 `pdk context` is the lower-level, universal context builder for prompts, notes,
 explicit indexed files, directories, profiles, JSON output, and custom filters.
-`pdk session` is the product workflow on top: thematic Markdown folders plus a
-question. `pdk export` is different again: it is for backup and import, not the
-daily AI session payload.
+`pdk session` is the product workflow on top: thematic Markdown folders saved as
+the current project session state. `pdk export` is different again: it is for
+backup and import, not the daily AI session payload.
 
 ## Voice capture into context
 
@@ -160,7 +167,8 @@ pdk scan docs/
 pdk project init
 pdk session init
 pdk session list
-pdk session build sport -q "What should I do today?" --copy
+pdk session build sport
+pdk show workout --context
 pdk audio --module work --heading "Inbox"
 pdk index README.md
 pdk index docs/
@@ -223,7 +231,8 @@ pdk note versions 1
 AI context is the command you use during daily work:
 
 ```bash
-pdk session build sport -q "What should I do today?" --copy
+pdk session build sport
+pdk show workout --context
 pdk session build all --dry-run
 pdk context client-a
 pdk context client-a --file README.md

@@ -99,8 +99,8 @@ class CliTest(unittest.TestCase):
         self.assertIn("Workflows:", helped.stdout)
         self.assertIn("How scope and projects fit together:", helped.stdout)
         self.assertIn("Examples", helped.stdout)
-        self.assertIn("pdk session init", helped.stdout)
-        self.assertIn('pdk session build sport -q "What should I do today?" --copy', helped.stdout)
+        self.assertIn("pdk session build sport", helped.stdout)
+        self.assertIn("pdk show workout --context", helped.stdout)
         self.assertIn("pdk context client-a", helped.stdout)
         self.assertIn("pdk context client-a --dir src --redact --budget 12000", helped.stdout)
         self.assertIn("pdk context --profile default --copy", helped.stdout)
@@ -111,28 +111,12 @@ class CliTest(unittest.TestCase):
 
         self.assertIn("Prompt Deck is a local AI context kit", readme)
         self.assertIn("## Session context from Markdown folders", readme)
-        self.assertIn("context/base", readme)
-        self.assertIn('pdk session build sport -q "Подбери 20-минутную тренировку после зала" --copy', readme)
-        self.assertIn("`pdk session` is the product workflow on top", readme)
-        self.assertIn("`pdk context` is the lower-level, universal context builder", readme)
+        self.assertIn("pdk session build sport", readme)
+        self.assertIn("pdk show workout --context", readme)
+        self.assertIn("saved session context", readme)
         self.assertIn("pdk context --profile default --copy", readme)
+        self.assertIn("`pdk context` is the lower-level, universal context builder", readme)
         self.assertIn("`pdk export` is different again", readme)
-
-    def test_session_help_explains_markdown_folder_workflow(self):
-        helped = run_pdk(self.tmp_path, "session", "--help")
-
-        self.assertEqual(helped.returncode, 0)
-        self.assertIn("context/base", helped.stdout)
-        self.assertIn("food, sport, study, and work", helped.stdout)
-        self.assertIn('pdk session build sport -q "Подбери 20-минутную тренировку после зала" --copy', helped.stdout)
-        self.assertIn("build refreshes the selected module files unless --no-index is passed", helped.stdout)
-
-        build_helped = run_pdk(self.tmp_path, "session", "build", "--help")
-        self.assertEqual(build_helped.returncode, 0)
-        self.assertIn("--copy", build_helped.stdout)
-        self.assertIn("--dry-run", build_helped.stdout)
-        self.assertIn("--budget", build_helped.stdout)
-        self.assertIn("--redact", build_helped.stdout)
 
     def test_add_show_and_list(self):
         added = run_pdk(
@@ -1276,19 +1260,54 @@ class CliTest(unittest.TestCase):
             "session",
             "build",
             "sport",
-            "-q",
-            "Какие упражнения сделать сегодня?",
             cwd=project,
         )
         self.assertEqual(built.returncode, 0)
         self.assertIn("# Prompt Deck Session", built.stdout)
-        self.assertIn("## Question", built.stdout)
-        self.assertIn("Какие упражнения сделать сегодня?", built.stdout)
+        self.assertNotIn("## Question", built.stdout)
         self.assertIn("- base", built.stdout)
         self.assertIn("- sport", built.stdout)
         self.assertIn("Base profile fact", built.stdout)
         self.assertIn("Sport training fact", built.stdout)
         self.assertNotIn("Food fact", built.stdout)
+
+        shown_session = run_pdk(self.tmp_path, "session", "show", cwd=project)
+        self.assertEqual(shown_session.returncode, 0)
+        self.assertEqual(shown_session.stdout, built.stdout)
+
+        self.assertEqual(
+            run_pdk(
+                self.tmp_path,
+                "add",
+                "workout",
+                input="User request:\n{{request}}\n",
+                cwd=project,
+            ).returncode,
+            0,
+        )
+        env = editor_env(
+            self.tmp_path,
+            [
+                "\n".join(
+                    [
+                        "# pdk variable form",
+                        "--- pdk begin {{request}} ---",
+                        "Подбери 20-минутную тренировку после зала",
+                        "--- pdk end {{request}} ---",
+                        "",
+                    ]
+                )
+            ],
+        )
+        prompt_with_context = run_pdk(self.tmp_path, "show", "workout", "--context", cwd=project, env=env)
+        self.assertEqual(prompt_with_context.returncode, 0)
+        self.assertIn("Подбери 20-минутную тренировку после зала", prompt_with_context.stdout)
+        self.assertIn("# Prompt Deck Session", prompt_with_context.stdout)
+        self.assertIn("Sport training fact", prompt_with_context.stdout)
+        self.assertLess(
+            prompt_with_context.stdout.index("Подбери 20-минутную тренировку после зала"),
+            prompt_with_context.stdout.index("# Prompt Deck Session"),
+        )
 
         output_path = project / "session.md"
         written = run_pdk(
@@ -1397,6 +1416,10 @@ class CliTest(unittest.TestCase):
         missing = run_pdk(self.tmp_path, "session", "build", "missing", cwd=project)
         self.assertEqual(missing.returncode, 1)
         self.assertIn("unknown session module: missing", missing.stderr)
+
+        removed_question_flag = run_pdk(self.tmp_path, "session", "build", "sport", "-q", "question", cwd=project)
+        self.assertEqual(removed_question_flag.returncode, 2)
+        self.assertIn("unrecognized arguments", removed_question_flag.stderr)
 
         empty = project / "empty"
         empty.mkdir()

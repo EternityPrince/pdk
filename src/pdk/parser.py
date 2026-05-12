@@ -65,6 +65,7 @@ from .commands import (
     cmd_session_build,
     cmd_session_init,
     cmd_session_list,
+    cmd_session_show,
     cmd_rm,
 )
 from .summary import DEFAULT_SUMMARY_MODEL
@@ -87,10 +88,10 @@ Workflows:
 Quick examples:
   pdk add review --tag refactor < review.md
   pdk project init
-  pdk session init
-  pdk session build sport -q "What should I do today?" --copy
   pdk index README.md
   pdk digest README.md
+  pdk session build sport
+  pdk show workout --context
   pdk context client-a
   pdk context client-a --file README.md
   pdk context client-a --dir src --redact --budget 12000
@@ -101,9 +102,9 @@ Quick examples:
   pdk import backup.json
 
 Session vs context vs backup:
-  `pdk session` is the product workflow for Markdown folders such as base,
-  food, sport, study, and work. Pick modules explicitly, add a question, and
-  copy the AI-ready Markdown.
+  `pdk session` builds and saves the last Markdown context from modules such as
+  base, food, sport, study, and work.
+  `pdk show NAME --context` appends that saved session after filling prompt placeholders.
   `pdk context` is the lower-level builder for prompts, notes, indexed files,
   directories, profiles, JSON output, and custom filters.
   `pdk export` is for backup and round-trip import/export.
@@ -116,8 +117,8 @@ How scope and projects fit together:
   by the active named project.
 
 Examples:
-  pdk session init
-  pdk session build sport -q "What should I do today?" --copy
+  pdk session build sport
+  pdk show workout --context
   pdk context client-a --dir src --redact --budget 12000
   pdk browse --query review
 
@@ -215,6 +216,7 @@ Project behavior:
 
     show = subparsers.add_parser("show", help="print a prompt")
     show.add_argument("name")
+    show.add_argument("--context", action="store_true", help="append the last built pdk session context")
     show.set_defaults(func=cmd_show)
 
     scan = subparsers.add_parser(
@@ -851,58 +853,41 @@ Examples:
         help="build AI context from thematic Markdown folders",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
-            "Build AI-ready Markdown from project-local context folders.\n"
-            "Keep durable facts in context/base plus topic folders like food, sport, study, and work.\n"
-            "Then select modules explicitly and add a question for the current AI session."
+            "Create, inspect, and build project-local Markdown context modules.\n"
+            "Build saves the latest session in .pdk/session.md so `pdk show NAME --context` can append it."
         ),
         epilog="""
 Examples:
   pdk session init
   pdk session list
-  pdk session build sport -q "Подбери 20-минутную тренировку после зала" --copy
-  pdk session build food sport -q "Оцени завтрак с учетом тренировок"
+  pdk session build sport
+  pdk session show
+  pdk show workout --context
   pdk session build all --dry-run
-
-Notes:
-  build includes module dependencies such as base.
-  build refreshes the selected module files unless --no-index is passed.
-  --dry-run prints the plan and token estimate without full file text.
 """,
     )
     session_subparsers = session.add_subparsers(dest="session_command", required=True)
 
-    session_init = session_subparsers.add_parser(
-        "init",
-        help="create starter session Markdown folders",
-        description="Create context/base, food, sport, study, and work Markdown files plus [session] config.",
-    )
+    session_init = session_subparsers.add_parser("init", help="create starter session Markdown folders")
     session_init.add_argument("path", nargs="?", help="session context folder; defaults to context")
     session_init.set_defaults(func=cmd_session_init)
 
-    session_list = session_subparsers.add_parser(
-        "list",
-        help="list configured session modules",
-        description="Show session module names, targets, dependencies, and descriptions.",
-    )
+    session_list = session_subparsers.add_parser("list", help="list configured session modules")
     session_list.set_defaults(func=cmd_session_list)
+
+    session_show = session_subparsers.add_parser("show", help="print the last built session context")
+    session_show.set_defaults(func=cmd_session_show)
 
     session_build = session_subparsers.add_parser(
         "build",
         help="build a session Markdown package",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
-            "Select session modules, refresh their indexed Markdown files, and render an AI-ready package.\n"
-            "Use --copy for clipboard, --dry-run for the plan, --budget for token warnings, and --redact for privacy."
+            "Select session modules, index their Markdown files, render an AI-ready context package, "
+            "and save it as the latest project session."
         ),
-        epilog="""
-Examples:
-  pdk session build sport -q "Подбери 20-минутную тренировку после зала" --copy
-  pdk session build food sport -q "Оцени завтрак с учетом тренировок" --copy
-  pdk session build all --dry-run --budget 16000
-""",
     )
     session_build.add_argument("modules", nargs="*", help="session module names, or all")
-    session_build.add_argument("-q", "--question", help="question or task to place at the top of the session")
     session_build.add_argument("--copy", action="store_true", help="copy rendered session to the clipboard")
     session_build.add_argument("--output", help="write session Markdown to a file")
     session_build.add_argument("--dry-run", action="store_true", help="show selected modules and token estimate")
