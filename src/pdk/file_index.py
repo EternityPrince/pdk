@@ -437,6 +437,19 @@ class FileIndex:
             ).fetchone()
         return row["summary"] if row else None
 
+    def file_text(self, file_id: int) -> str:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT text
+                FROM file_chunks
+                WHERE file_id = ?
+                ORDER BY chunk_index
+                """,
+                (file_id,),
+            ).fetchall()
+        return "\n\n".join(row["text"] for row in rows)
+
     def entities(self, value: str) -> list[sqlite3.Row]:
         file = self.get_file(value)
         with self.connect() as conn:

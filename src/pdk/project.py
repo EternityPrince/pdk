@@ -9,6 +9,49 @@ from .database import SQLiteDatabase
 PROJECT_DIR = ".pdk"
 LEGACY_PROJECT_DIR = ".pmpt"
 PROJECT_DB = "prompts.sqlite3"
+CONTEXT_CONFIG_TEMPLATE = """[context.default]
+dirs = ["src", "docs"]
+files = ["README.md"]
+exclude = [
+  "**/.venv/**",
+  "**/node_modules/**",
+  "**/__pycache__/**",
+  "**/.env*",
+]
+file_detail = "summary"
+budget = 12000
+redact = true
+
+[context.docs]
+dirs = ["docs"]
+files = ["README.md"]
+file_detail = "summary"
+budget = 8000
+redact = true
+
+[context.code]
+dirs = ["src"]
+exclude = ["**/tests/fixtures/**"]
+file_detail = "summary"
+budget = 16000
+redact = true
+"""
+PDKIGNORE_TEMPLATE = """.venv/
+venv/
+node_modules/
+__pycache__/
+dist/
+build/
+target/
+.cache/
+.DS_Store
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.crt
+"""
 
 ScopeMode = Literal["auto", "global", "project"]
 
@@ -41,6 +84,12 @@ class ProjectResolver:
         gitignore = project_dir / ".gitignore"
         if not gitignore.exists():
             gitignore.write_text(f"{PROJECT_DB}\n", encoding="utf-8")
+        context_config = project_dir / "context.toml"
+        if not context_config.exists():
+            context_config.write_text(CONTEXT_CONFIG_TEMPLATE, encoding="utf-8")
+        pdkignore = root / ".pdkignore"
+        if not pdkignore.exists():
+            pdkignore.write_text(PDKIGNORE_TEMPLATE, encoding="utf-8")
         db_path = project_dir / PROJECT_DB
         SQLiteDatabase(db_path)
         return StoreContext(scope="project", database_path=db_path, project_root=root)

@@ -11,4 +11,7 @@ def test_completion_scripts_target_pdk_and_prompt_commands():
     assert "complete -F _pdk_complete pdk" in bash
     assert "#compdef pdk" in zsh
     assert "complete -c pdk" in fish
+    assert "session" in bash
+    assert "session_commands" in zsh
+    assert "init list build" in fish
     assert "show|edit|clip|use|rm|rename|feedback|comment|versions" in bash

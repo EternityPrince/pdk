@@ -81,6 +81,20 @@ def cmd_check(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: T
     return 0
 
 
+def cmd_tokens(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
+    source, text = _read_text_source(args, stdin)
+    token_count = count_tokens(text)
+    if args.details:
+        tokenizer = DEFAULT_ENCODING if has_exact_tokenizer() else "fallback"
+        stdout.write(f"source\t{source}\n")
+        stdout.write(f"tokens\t{token_count}\n")
+        stdout.write(f"tokenizer\t{tokenizer}\n")
+        stdout.write(f"characters\t{len(text)}\n")
+        return 0
+    stdout.write(f"{token_count}\n")
+    return 0
+
+
 def cmd_redact(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
     _, text = _read_text_source(args, stdin)
     stdout.write(

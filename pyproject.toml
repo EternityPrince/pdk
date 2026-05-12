@@ -16,6 +16,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+audio = [
+    "ctranslate2>=4.6",
+    "faster-whisper>=1.1",
+    "numpy>=1.26",
+    "sounddevice>=0.5",
+]
 files = [
     "beautifulsoup4>=4.12",
     "EbookLib>=0.18",

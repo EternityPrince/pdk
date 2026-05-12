@@ -72,3 +72,24 @@ class FileIndexTest(TestCase):
 
         self.assertEqual(self.db.get_file(str(file_id)).path, str(path))
         self.assertEqual(self.db.get_file(str(path)).id, file_id)
+
+    def test_file_text_reads_chunks_in_index_order(self):
+        path = self.tmp_path / "doc.txt"
+        path.write_text("Disk body should not be read", encoding="utf-8")
+        file_id = self.db.upsert_file(
+            path=path,
+            kind="txt",
+            sha256=file_sha256(path),
+            token_count=4,
+            line_count=1,
+            char_count=28,
+        )
+        self.db.add_chunks(
+            file_id,
+            [
+                ChunkDraft(1, "Second chunk", 13, 25, 2),
+                ChunkDraft(0, "First chunk", 0, 11, 2),
+            ],
+        )
+
+        self.assertEqual(self.db.file_text(file_id), "First chunk\n\nSecond chunk")

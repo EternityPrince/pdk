@@ -2,6 +2,7 @@ from __future__ import annotations
 
 COMPLETION_COMMANDS = (
     "add",
+    "audio",
     "browse",
     "check",
     "clip",
@@ -27,6 +28,7 @@ COMPLETION_COMMANDS = (
     "rename",
     "rm",
     "security",
+    "session",
     "show",
     "scan",
     "digest",
@@ -34,6 +36,8 @@ COMPLETION_COMMANDS = (
     "stats",
     "tag",
     "tags",
+    "tok",
+    "tokens",
     "usage",
     "use",
     "versions",
@@ -42,6 +46,7 @@ COMPLETION_COMMANDS = (
 
 def bash_completion() -> str:
     commands = " ".join(COMPLETION_COMMANDS)
+    session_commands = "init list build"
     return f"""_pdk_complete()
 {{
     local cur prev
@@ -53,6 +58,13 @@ def bash_completion() -> str:
         return 0
     fi
     case "${{COMP_WORDS[1]}}" in
+        session)
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "{session_commands}" -- "$cur") )
+            else
+                COMPREPLY=()
+            fi
+            ;;
         show|edit|clip|use|rm|rename|feedback|comment|versions)
             COMPREPLY=( $(compgen -W "$(pdk list 2>/dev/null | awk 'NR>1 {{print $1}}')" -- "$cur") )
             ;;
@@ -67,16 +79,23 @@ complete -F _pdk_complete pdk
 
 def zsh_completion() -> str:
     commands = " ".join(f"'{command}:pdk {command}'" for command in COMPLETION_COMMANDS)
+    session_commands = "'init:create starter context folders' 'list:list session modules' 'build:build session context'"
     return f"""#compdef pdk
 _pdk() {{
-  local -a commands prompts
+  local -a commands prompts session_commands
   commands=({commands})
   prompts=(${{(f)"$(pdk list 2>/dev/null | awk 'NR>1 {{print $1}}')"}})
+  session_commands=({session_commands})
   if (( CURRENT == 2 )); then
     _describe 'command' commands
     return
   fi
   case $words[2] in
+    session)
+      if (( CURRENT == 3 )); then
+        _describe 'session command' session_commands
+      fi
+      ;;
     show|edit|clip|use|rm|rename|feedback|comment|versions)
       _describe 'prompt' prompts
       ;;
@@ -93,6 +112,8 @@ def fish_completion() -> str:
     prompt_commands = "show edit clip use rm rename feedback comment versions"
     return (
         f"{command_lines}\n"
+        "complete -c pdk -f -n '__fish_seen_subcommand_from session; "
+        "and not __fish_seen_subcommand_from init list build' -a 'init list build'\n"
         f"complete -c pdk -f -n 'contains (commandline -opc)[2] {prompt_commands}' "
         """-a '(pdk list 2>/dev/null | awk "NR>1 {print \\$1}")'\n"""
     )

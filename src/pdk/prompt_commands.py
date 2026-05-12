@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import subprocess
+from pathlib import Path
 from typing import TextIO
 
 from .command_support import (
@@ -19,6 +20,7 @@ from .command_support import (
 )
 from .completions import bash_completion, fish_completion, zsh_completion
 from .editor import TextEditor
+from .file_index import FileIndex
 from .interactive import Clipboard, InteractiveBrowser
 from .models import Prompt, PromptStats, UsageAction
 from .prompt_hygiene import duplicate_groups, stale_prompts
@@ -266,15 +268,30 @@ def cmd_doctor(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: 
     notes = store.notes(project_id=project_id, project_filter=project_filter)
     duplicates = duplicate_groups(prompts)
     stale = stale_prompts(prompts, stats_by_name, days=args.days)
+    untagged = sum(1 for prompt in prompts if not prompt.tags)
+    indexed_without_summaries = sum(1 for file in FileIndex().files() if not file.summary)
     stdout.write(f"database\t{context.database_path}\n")
     stdout.write(f"scope\t{context.scope}\n")
     stdout.write(f"prompts\t{len(prompts)}\n")
     stdout.write(f"projects\t{len(projects)}\n")
     stdout.write(f"notes\t{len(notes)}\n")
-    stdout.write(f"untagged\t{sum(1 for prompt in prompts if not prompt.tags)}\n")
+    stdout.write(f"untagged\t{untagged}\n")
     stdout.write(f"unbound\t{sum(1 for prompt in prompts if prompt.project_id is None)}\n")
     stdout.write(f"duplicate_groups\t{len(duplicates)}\n")
     stdout.write(f"stale\t{len(stale)}\n")
+    stdout.write("\nRecommendations\n")
+    if untagged > 0:
+        stdout.write(f"- {untagged} prompts have no tags. Add tags with: pdk tag add NAME TAG\n")
+    if len(duplicates) > 0:
+        stdout.write(f"- {len(duplicates)} duplicate prompt groups found. Inspect with: pdk duplicates\n")
+    if len(stale) > 0:
+        stdout.write(f"- {len(stale)} prompts look stale. Inspect with: pdk stale --days DAYS\n")
+    if indexed_without_summaries > 0:
+        stdout.write(f"- {indexed_without_summaries} indexed files have no summaries. Run: pdk digest\n")
+    if context.scope == "project" and context.project_root is not None:
+        context_config = Path(context.project_root) / ".pdk" / "context.toml"
+        if not context_config.exists():
+            stdout.write("- No context config found. Run: pdk project init\n")
     return 0
 
 

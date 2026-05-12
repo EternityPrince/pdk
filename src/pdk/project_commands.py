@@ -27,7 +27,20 @@ from .ui import ConsoleStyle, PromptFormatter
 
 def cmd_project_init(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
     context = ProjectResolver().initialize(Path(args.path) if args.path else None)
-    _reporter(args, stderr).success(f"Initialized project prompt store at {context.database_path}")
+    root = context.project_root or context.database_path.parent.parent
+    _reporter(args, stderr).success(
+        "\n".join(
+            [
+                f"Created local prompt store: {context.database_path}",
+                f"Created context config: {root / '.pdk' / 'context.toml'}",
+                f"Created .pdkignore: {root / '.pdkignore'}",
+                "Next:",
+                "  pdk index README.md",
+                "  pdk context --profile default",
+                "  pdk context --dir src --redact --budget 12000",
+            ]
+        )
+    )
     return 0
 
 

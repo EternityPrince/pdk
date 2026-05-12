@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 
+from .audio_commands import DEFAULT_AUDIO_MODEL_NAME, default_audio_model
 from .commands import (
+    cmd_audio,
     cmd_add,
     cmd_edit,
     cmd_show,
@@ -13,6 +15,7 @@ from .commands import (
     cmd_file_show,
     cmd_file_entities,
     cmd_check,
+    cmd_tokens,
     cmd_redact,
     cmd_clip,
     cmd_list,
@@ -58,6 +61,10 @@ from .commands import (
     cmd_security_lock,
     cmd_security_unlock,
     cmd_completions,
+    cmd_context,
+    cmd_session_build,
+    cmd_session_init,
+    cmd_session_list,
     cmd_rm,
 )
 from .summary import DEFAULT_SUMMARY_MODEL
@@ -68,36 +75,38 @@ def build_parser() -> argparse.ArgumentParser:
         prog="pdk",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
-            "Prompt Deck keeps reusable prompts, notes, comments, and history close to your shell.\n"
-            "Use it as a small context library: save prompts, group them into named projects,\n"
-            "and export the active context as Markdown when an AI needs the whole picture."
+            "Prompt Deck is a local AI context kit.\n"
+            "Save reusable prompts, prepare safe AI context, and index/digest files from your shell."
         ),
         epilog="""
-Use cases:
-  Save a prompt from stdin:
-    pdk add review --tag work < review.md
+Workflows:
+  1. Save reusable prompts
+  2. Prepare safe AI context
+  3. Index and digest files
 
-  Print a prompt cleanly for a pipe:
-    pdk show review | pbcopy
+Quick examples:
+  pdk add review --tag refactor < review.md
+  pdk project init
+  pdk session init
+  pdk session build sport -q "What should I do today?" --copy
+  pdk index README.md
+  pdk digest README.md
+  pdk context client-a
+  pdk context client-a --file README.md
+  pdk context client-a --dir src --redact --budget 12000
+  pdk context --profile default --copy
+  pdk context --profile default --compact --copy
+  pdk tokens
+  pdk export --format json --output backup.json
+  pdk import backup.json
 
-  Work inside the nearest .pdk store instead of the global store:
-    pdk project init
-    pdk add repo-review < prompt.md
-
-  Group prompts inside the current store:
-    pdk project create client-a "Client A launch"
-    pdk project use client-a
-    pdk add launch-review < review.md
-    pdk project edit client-a
-
-  Keep notes beside prompts:
-    pdk note add "Decision log"
-    pdk note add "Launch facts" --project client-a
-
-  Export context for an AI:
-    pdk context client-a > context.md
-    pdk context client-a | pbcopy
-    pdk context --all > full-context.md
+Session vs context vs backup:
+  `pdk session` is the product workflow for Markdown folders such as base,
+  food, sport, study, and work. Pick modules explicitly, add a question, and
+  copy the AI-ready Markdown.
+  `pdk context` is the lower-level builder for prompts, notes, indexed files,
+  directories, profiles, JSON output, and custom filters.
+  `pdk export` is for backup and round-trip import/export.
 
 How scope and projects fit together:
   --scope chooses the database first. In auto mode, pdk uses .pdk/prompts.sqlite3
@@ -107,7 +116,9 @@ How scope and projects fit together:
   by the active named project.
 
 Examples:
-  pdk context client-a > context.md
+  pdk session init
+  pdk session build sport -q "What should I do today?" --copy
+  pdk context client-a --dir src --redact --budget 12000
   pdk browse --query review
 
 Run `pdk COMMAND --help` for command-specific examples.
@@ -126,6 +137,52 @@ Run `pdk COMMAND --help` for command-specific examples.
         help="choose prompt store; auto uses .pdk when present",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    audio = subparsers.add_parser(
+        "audio",
+        help="record speech and transcribe it into text",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Record microphone audio, transcribe it with a local faster-whisper model, "
+            "and optionally append the transcript as a Markdown bullet."
+        ),
+        epilog=f"""
+Examples:
+  pdk audio
+  pdk audio --model {DEFAULT_AUDIO_MODEL_NAME}
+  pdk audio --module work --heading "Decisions"
+  pdk audio --append context/base/goals.md --heading "Current goals"
+  pdk audio --list-models
+
+Model names:
+  Use --list-models to see configured names and paths. AUDIO_WHISPER_MODEL can
+  contain either a configured name or a custom local model path.
+""",
+    )
+    audio.add_argument("--model", default=default_audio_model(), help="model name from --list-models or local path")
+    audio.add_argument("--list-models", action="store_true", help="list configured local Whisper models")
+    audio.add_argument(
+        "--device",
+        default="auto",
+        choices=("auto", "cpu", "cuda"),
+        help="device used by faster-whisper",
+    )
+    audio.add_argument(
+        "--compute-type",
+        default="float32",
+        help="faster-whisper compute type, for example float32, int8, float16",
+    )
+    audio.add_argument("--language", help="language code hint for Whisper, for example ru or en")
+    audio.add_argument("--copy", action="store_true", help="copy transcript to the clipboard")
+    audio.add_argument("--quiet", action="store_true", help="do not print transcript to stdout")
+    audio.add_argument("--text", help="skip recording and use this text as the transcript")
+    audio_target = audio.add_mutually_exclusive_group()
+    audio_target.add_argument("--append", help="append transcript as a Markdown bullet to this file")
+    audio_target.add_argument("--module", help="append transcript to a session module inbox file")
+    audio.add_argument("--context-file", default="inbox.md", help="module file used with --module")
+    audio.add_argument("--heading", help="Markdown section heading to append under")
+    audio.add_argument("--no-timestamp", action="store_true", help="append the bullet without a timestamp")
+    audio.set_defaults(func=cmd_audio)
 
     add = subparsers.add_parser(
         "add",
@@ -287,6 +344,27 @@ Examples:
     check.add_argument("--model-threshold", type=float, help="override the ML confidence threshold")
     check.add_argument("--show-spans", action="store_true", help="show detected private-data spans")
     check.set_defaults(func=cmd_check)
+
+    tokens = subparsers.add_parser(
+        "tokens",
+        aliases=["tok"],
+        help="count tokens in the clipboard",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Count tokens quickly. By default, reads the current clipboard and prints only the number.",
+        epilog="""
+Examples:
+  pdk tokens
+  pdk tok
+  pdk tokens --stdin < prompt.md
+  pdk tokens draft.md --details
+""",
+    )
+    tokens.add_argument("paths", nargs="*", help="optional single file to count; defaults to clipboard")
+    tokens_source = tokens.add_mutually_exclusive_group()
+    tokens_source.add_argument("--stdin", action="store_true", help="read text from stdin instead of the clipboard")
+    tokens_source.add_argument("--file", help="read text from a UTF-8 file instead of the clipboard")
+    tokens.add_argument("--details", action="store_true", help="show source, tokenizer, and character count")
+    tokens.set_defaults(func=cmd_tokens)
 
     redact = subparsers.add_parser(
         "redact",
@@ -588,7 +666,11 @@ Use cases:
     project_unassign = project_subparsers.add_parser("unassign", help="remove prompts from named projects")
     project_unassign.add_argument("prompts", nargs="+")
     project_unassign.set_defaults(func=cmd_project_unassign)
-    project_init = project_subparsers.add_parser("init", help="initialize .pdk in a folder")
+    project_init = project_subparsers.add_parser(
+        "init",
+        help="initialize .pdk in a folder",
+        description="Create a local Prompt Deck store plus starter AI context config files.",
+    )
     project_init.add_argument("path", nargs="?", help="project folder; defaults to cwd")
     project_init.set_defaults(func=cmd_project_init)
     project_status = project_subparsers.add_parser("status", help="show active prompt store")
@@ -722,24 +804,119 @@ Examples:
         "context",
         help="write the current AI context",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        description="Alias for export, named for the common use-case: gather active AI context.",
+        description="Gather prompts, notes, and comments for an AI session.",
         epilog="""
 Examples:
   pdk context > context.md
   pdk context thesis | pbcopy
   pdk context --include notes,comments
+  pdk context --profile default --compact --copy
 """,
     )
     context.add_argument("project_name", nargs="?", help="named project to export")
     context.add_argument("--project", help="export a named project")
     context.add_argument("--all", action="store_true", help="export the entire current store")
     context.add_argument("--no-project", action="store_true", help="export unbound prompts and notes")
-    context.add_argument("--include", help="comma-separated sections: usage,versions,comments,notes")
+    context.add_argument(
+        "--include",
+        action="append",
+        help="context sections (usage,versions) or file glob include pattern; repeat for file patterns",
+    )
     context.add_argument("--since", help="include dated history from DATE or ISO timestamp")
     context.add_argument("--format", choices=("markdown", "json"), default="markdown", help="export format")
+    context.add_argument("--profile", help="load context defaults from .pdk/context.toml")
+    context.add_argument("--budget", type=int, help="target context token budget")
     context.add_argument("--redact", action="store_true", help="mask secret-like values in exported text")
+    context.add_argument("--privacy-profile", help="use a named privacy profile for redaction")
+    context.add_argument("--privacy-model", action="store_true", help="also use configured ML privacy detector")
+    context.add_argument("--privacy-model-name", help="override privacy ML model name")
+    context.add_argument("--privacy-model-threshold", type=float, help="override privacy ML confidence threshold")
+    context.add_argument("--copy", action="store_true", help="copy rendered context to the clipboard")
+    context.add_argument("--compact", action="store_true", help="render a tighter Markdown context package")
+    context.add_argument("--dry-run", action="store_true", help="show context plan and token estimate without output")
     context.add_argument("--output", help="write context to a file")
-    context.set_defaults(func=cmd_export)
+    context.add_argument("--file", action="append", help="include indexed file id or path; repeat for multiple files")
+    context.add_argument("--dir", action="append", help="include already-indexed files under a directory; repeatable")
+    context.add_argument("--exclude", action="append", help="file glob exclude pattern; repeatable")
+    context.add_argument(
+        "--file-detail",
+        choices=("summary", "full"),
+        default=None,
+        help="include file summary or full extracted text",
+    )
+    context.set_defaults(func=cmd_context)
+
+    session = subparsers.add_parser(
+        "session",
+        help="build AI context from thematic Markdown folders",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Build AI-ready Markdown from project-local context folders.\n"
+            "Keep durable facts in context/base plus topic folders like food, sport, study, and work.\n"
+            "Then select modules explicitly and add a question for the current AI session."
+        ),
+        epilog="""
+Examples:
+  pdk session init
+  pdk session list
+  pdk session build sport -q "Подбери 20-минутную тренировку после зала" --copy
+  pdk session build food sport -q "Оцени завтрак с учетом тренировок"
+  pdk session build all --dry-run
+
+Notes:
+  build includes module dependencies such as base.
+  build refreshes the selected module files unless --no-index is passed.
+  --dry-run prints the plan and token estimate without full file text.
+""",
+    )
+    session_subparsers = session.add_subparsers(dest="session_command", required=True)
+
+    session_init = session_subparsers.add_parser(
+        "init",
+        help="create starter session Markdown folders",
+        description="Create context/base, food, sport, study, and work Markdown files plus [session] config.",
+    )
+    session_init.add_argument("path", nargs="?", help="session context folder; defaults to context")
+    session_init.set_defaults(func=cmd_session_init)
+
+    session_list = session_subparsers.add_parser(
+        "list",
+        help="list configured session modules",
+        description="Show session module names, targets, dependencies, and descriptions.",
+    )
+    session_list.set_defaults(func=cmd_session_list)
+
+    session_build = session_subparsers.add_parser(
+        "build",
+        help="build a session Markdown package",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=(
+            "Select session modules, refresh their indexed Markdown files, and render an AI-ready package.\n"
+            "Use --copy for clipboard, --dry-run for the plan, --budget for token warnings, and --redact for privacy."
+        ),
+        epilog="""
+Examples:
+  pdk session build sport -q "Подбери 20-минутную тренировку после зала" --copy
+  pdk session build food sport -q "Оцени завтрак с учетом тренировок" --copy
+  pdk session build all --dry-run --budget 16000
+""",
+    )
+    session_build.add_argument("modules", nargs="*", help="session module names, or all")
+    session_build.add_argument("-q", "--question", help="question or task to place at the top of the session")
+    session_build.add_argument("--copy", action="store_true", help="copy rendered session to the clipboard")
+    session_build.add_argument("--output", help="write session Markdown to a file")
+    session_build.add_argument("--dry-run", action="store_true", help="show selected modules and token estimate")
+    session_build.add_argument("--no-index", action="store_true", help="do not index selected module paths first")
+    session_build.add_argument("--budget", type=int, help="target session token budget")
+    session_build.add_argument("--redact", action="store_true", help="mask private values in rendered text")
+    session_build.add_argument("--compact", action="store_true", help="render a tighter context package")
+    session_build.add_argument(
+        "--file-detail",
+        choices=("summary", "full"),
+        default=None,
+        help="include file summary or full extracted text; defaults to full",
+    )
+    session_build.set_defaults(func=cmd_session_build)
 
     security = subparsers.add_parser(
         "security",

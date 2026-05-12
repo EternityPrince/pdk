@@ -31,8 +31,7 @@ def count_tokens(text: str) -> int:
 
 
 def token_summary(template: str, rendered: str | None = None) -> str:
-    label = "tokens" if has_exact_tokenizer() else "tokens~"
     template_count = count_tokens(template)
     if rendered is None or rendered == template:
-        return f"{label}: {template_count}"
-    return f"{label}: template={template_count} rendered={count_tokens(rendered)}"
+        return f"tokens: {template_count}"
+    return f"tokens: template={template_count} rendered={count_tokens(rendered)}"

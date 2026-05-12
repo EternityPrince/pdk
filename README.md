@@ -1,6 +1,151 @@
 # Prompt Deck
 
-`pdk` is a small global prompt store for the shell.
+Prompt Deck is a local AI context kit for the shell.
+
+It is built around three everyday workflows:
+
+1. Save reusable prompts.
+2. Prepare safe AI context.
+3. Index and digest files.
+
+```bash
+pdk add review --tag refactor < review.md
+pdk project init
+pdk session init
+pdk session list
+pdk session build sport -q "Подбери 20-минутную тренировку после зала" --copy
+pdk session build food sport -q "Оцени завтрак с учетом тренировок" --copy
+pdk session build all --dry-run
+pdk audio --module work --heading "Inbox"
+pdk context client-a
+pdk context client-a --file README.md
+pdk context client-a --dir src --redact --budget 12000
+pdk export --format json --output backup.json
+```
+
+## Session context from Markdown folders
+
+`pdk session` is the fast path for a common AI workflow: keep long-lived personal
+or project context in thematic Markdown folders, then build one AI-ready prompt
+for a specific question.
+
+Write durable facts in `context/base` and topic folders:
+
+```text
+context/
+  base/
+    profile.md
+    preferences.md
+    goals.md
+  food/
+    nutrition.md
+  sport/
+    training.md
+  study/
+    learning.md
+  work/
+    projects.md
+```
+
+`base` is for your profile, goals, and preferences. `food`, `sport`, `study`,
+and `work` are topic modules. When you build a topic such as `sport`, Prompt Deck
+also includes its dependencies such as `base`. By default `session build`
+refreshes the file index for the selected modules; use `--no-index` only when
+you intentionally want the previously indexed content.
+
+```bash
+pdk session init
+pdk session list
+pdk session build sport -q "Подбери 20-минутную тренировку после зала" --copy
+pdk session build food sport -q "Оцени завтрак с учетом тренировок" --copy
+pdk session build all --dry-run
+```
+
+`--copy` puts the final Markdown in your clipboard. Use `--dry-run` to see
+modules, files, token estimate, and budget status without printing full file
+text. Use `--budget 12000` to warn when the package is too large, and `--redact`
+to mask emails, phone numbers, and other configured private data before copying.
+
+Session settings live in project-local `.pdk/context.toml`:
+
+```toml
+[session]
+root = "context"
+default_modules = ["base"]
+file_detail = "full"
+compact = true
+budget = 16000
+redact = false
+
+[session.modules.base]
+description = "General profile, goals, and preferences"
+dirs = ["context/base"]
+
+[session.modules.sport]
+description = "Training, activity, and recovery"
+dirs = ["context/sport"]
+depends_on = ["base"]
+```
+
+`pdk context` is the lower-level, universal context builder for prompts, notes,
+explicit indexed files, directories, profiles, JSON output, and custom filters.
+`pdk session` is the product workflow on top: thematic Markdown folders plus a
+question. `pdk export` is different again: it is for backup and import, not the
+daily AI session payload.
+
+## Voice capture into context
+
+`pdk audio` records from the microphone until Enter is pressed, transcribes the
+audio with a local faster-whisper model, and prints the transcript. Use model
+names instead of long paths:
+
+```bash
+pdk audio --list-models
+pdk audio --model large-v3-turbo
+```
+
+To turn a quick spoken thought into durable session context, append it as a
+Markdown bullet:
+
+```bash
+pdk audio --module work --heading "Inbox"
+pdk audio --append context/base/goals.md --heading "Current goals"
+```
+
+`--module work` writes to `context/work/inbox.md` by default. Set
+`AUDIO_WHISPER_MODEL` to either a configured model name or a custom local
+faster-whisper model path. Install audio dependencies with:
+
+```bash
+uv sync --extra audio
+```
+
+Project profiles live in `.pdk/context.toml`. A profile can describe the whole
+context package, or split it into named modules so the rendered context shows
+which indexed files belong together and how those modules relate:
+
+```toml
+[context.default]
+dirs = ["docs"]
+files = ["README.md"]
+file_detail = "summary"
+compact = true
+
+[[context.default.modules]]
+name = "runtime"
+description = "CLI entrypoints and command orchestration"
+dirs = ["src/pdk"]
+include = ["*.py"]
+exclude = ["*_commands.py"]
+depends_on = ["storage"]
+
+[[context.default.modules]]
+name = "storage"
+dirs = ["src/pdk"]
+include = ["database.py", "store.py", "file_index.py"]
+```
+
+## Quick Reference
 
 ```bash
 pdk add review < review_prompt.txt
@@ -12,9 +157,18 @@ pdk edit review
 pdk show review | pbcopy
 pdk scan
 pdk scan docs/
+pdk project init
+pdk session init
+pdk session list
+pdk session build sport -q "What should I do today?" --copy
+pdk audio --module work --heading "Inbox"
+pdk index README.md
 pdk index docs/
 pdk digest
 pdk digest --generate
+pdk context --profile default --copy
+pdk context --profile default --compact --copy
+pdk tokens
 pdk check
 pdk check --show-spans
 pdk check --profile client_a
@@ -66,18 +220,22 @@ pdk note edit 1
 pdk note versions 1
 ```
 
-Markdown export includes prompts, notes, comments, previous versions, and usage history:
+AI context is the command you use during daily work:
 
 ```bash
-pdk export
-pdk context client-a > context.md
-pdk export --all
-pdk export --no-project
-pdk export --format json --output deck.json
-pdk export --redact > safe-context.md
-pdk import deck.json
-pdk import context.md --format markdown
-pdk import deck.json --dry-run
+pdk session build sport -q "What should I do today?" --copy
+pdk session build all --dry-run
+pdk context client-a
+pdk context client-a --file README.md
+pdk context client-a --dir src --redact --budget 12000
+pdk context --profile default --copy
+```
+
+Backup and round-trip import/export stay separate:
+
+```bash
+pdk export --format json --output backup.json
+pdk import backup.json
 pdk security status
 PDK_PASSPHRASE='...' pdk security lock
 PDK_PASSPHRASE='...' pdk security unlock
@@ -111,7 +269,19 @@ pdk browse --plain
 
 `pdk list` prints a compact catalog table with prompt names, token counts, tags, use counts, edit counts, feedback counts, and last-used time. It intentionally omits prompt body previews so the list stays useful as an inventory.
 
-Token counts use the `o200k_base` tokenizer. `pdk scan` is the easiest privacy entry point: with no arguments it scans the clipboard, and with files or folders it scans those sources and prints a compact table of findings, tokens, lines, characters, and detected private-data types.
+Token counts use the `o200k_base` tokenizer. `pdk tokens` is the fastest
+clipboard counter: with no arguments it reads the current clipboard and prints
+only the token count. Use `pdk tok` as a short alias, or `--details` when you
+want the source and tokenizer too.
+
+```bash
+pdk tokens
+pdk tok
+pdk tokens --stdin < prompt.md
+pdk tokens draft.md --details
+```
+
+`pdk scan` is the easiest privacy entry point: with no arguments it scans the clipboard, and with files or folders it scans those sources and prints a compact table of findings, tokens, lines, characters, and detected private-data types.
 
 ```bash
 pdk scan

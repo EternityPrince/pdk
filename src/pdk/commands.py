@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from .audio_commands import cmd_audio
 from .command_support import CLI_ERRORS, CliError, report_cli_error
+from .context_commands import cmd_context
 from .file_commands import (
     cmd_digest,
     cmd_file_entities,
@@ -20,6 +22,7 @@ from .privacy_commands import (
     cmd_security_lock,
     cmd_security_status,
     cmd_security_unlock,
+    cmd_tokens,
 )
 from .project_commands import (
     cmd_note_add,
@@ -40,6 +43,7 @@ from .project_commands import (
     cmd_project_unassign,
     cmd_project_use,
 )
+from .session_commands import cmd_session_build, cmd_session_init, cmd_session_list
 from .prompt_commands import (
     cmd_add,
     cmd_browse,
@@ -69,11 +73,13 @@ __all__ = [
     "CLI_ERRORS",
     "CliError",
     "annotations",
+    "cmd_audio",
     "cmd_add",
     "cmd_browse",
     "cmd_check",
     "cmd_clip",
     "cmd_completions",
+    "cmd_context",
     "cmd_digest",
     "cmd_doctor",
     "cmd_duplicates",
@@ -117,12 +123,16 @@ __all__ = [
     "cmd_security_lock",
     "cmd_security_status",
     "cmd_security_unlock",
+    "cmd_session_build",
+    "cmd_session_init",
+    "cmd_session_list",
     "cmd_show",
     "cmd_stale",
     "cmd_stats",
     "cmd_tag_add",
     "cmd_tag_rm",
     "cmd_tags",
+    "cmd_tokens",
     "cmd_usage",
     "cmd_versions",
     "report_cli_error",
