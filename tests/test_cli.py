@@ -106,6 +106,20 @@ class CliTest(unittest.TestCase):
         self.assertIn("pdk context --profile default --copy", helped.stdout)
         self.assertNotIn('pdk note add --title "Decision log" < notes.md', helped.stdout)
 
+    def test_session_and_clip_help_show_state_flow_commands(self):
+        clip_help = run_pdk(self.tmp_path, "clip", "--help")
+        self.assertEqual(clip_help.returncode, 0)
+        self.assertIn("--context", clip_help.stdout)
+
+        session_help = run_pdk(self.tmp_path, "session", "--help")
+        self.assertEqual(session_help.returncode, 0)
+        self.assertIn("clear", session_help.stdout)
+        self.assertIn("pdk clip workout --context", session_help.stdout)
+
+        clear_help = run_pdk(self.tmp_path, "session", "clear", "--help")
+        self.assertEqual(clear_help.returncode, 0)
+        self.assertIn("Delete .pdk/session.md", clear_help.stdout)
+
     def test_readme_documents_v02_context_workflow(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
@@ -113,6 +127,8 @@ class CliTest(unittest.TestCase):
         self.assertIn("## Session context from Markdown folders", readme)
         self.assertIn("pdk session build sport", readme)
         self.assertIn("pdk show workout --context", readme)
+        self.assertIn("pdk clip workout --context", readme)
+        self.assertIn("pdk session clear", readme)
         self.assertIn("saved session context", readme)
         self.assertIn("pdk context --profile default --copy", readme)
         self.assertIn("`pdk context` is the lower-level, universal context builder", readme)
@@ -1264,6 +1280,7 @@ class CliTest(unittest.TestCase):
         )
         self.assertEqual(built.returncode, 0)
         self.assertIn("# Prompt Deck Session", built.stdout)
+        self.assertIn("Saved session state .pdk/session.md", built.stderr)
         self.assertNotIn("## Question", built.stdout)
         self.assertIn("- base", built.stdout)
         self.assertIn("- sport", built.stdout)
@@ -1324,6 +1341,103 @@ class CliTest(unittest.TestCase):
         self.assertEqual(written.stdout, "")
         self.assertIn("Wrote session", written.stderr)
         self.assertIn("Sport training fact", output_path.read_text(encoding="utf-8"))
+
+    def test_clip_prompt_with_session_context(self):
+        project = self.tmp_path / "project"
+        project.mkdir()
+        self.assertEqual(run_pdk(self.tmp_path, "session", "init", cwd=project).returncode, 0)
+        (project / "context" / "base" / "profile.md").write_text("Base profile fact\n", encoding="utf-8")
+        (project / "context" / "sport" / "training.md").write_text("Sport training fact\n", encoding="utf-8")
+
+        built = run_pdk(self.tmp_path, "session", "build", "sport", cwd=project)
+        self.assertEqual(built.returncode, 0)
+        self.assertIn("Saved session state", built.stderr)
+
+        added = run_pdk(self.tmp_path, "add", "workout", input="Plan: {{request}}\n", cwd=project)
+        self.assertEqual(added.returncode, 0)
+
+        clip_file = self.tmp_path / "prompt-context-clipboard.txt"
+        env = fake_path_env(
+            self.tmp_path,
+            {
+                "pbcopy": '#!/bin/sh\ncat > "$PDK_CLIP_FILE"\n',
+            },
+            {"PDK_CLIP_FILE": str(clip_file)},
+        )
+        env.update(
+            editor_env(
+                self.tmp_path,
+                [
+                    "\n".join(
+                        [
+                            "# pdk variable form",
+                            "--- pdk begin {{request}} ---",
+                            "20-minute recovery workout",
+                            "--- pdk end {{request}} ---",
+                            "",
+                        ]
+                    )
+                ],
+            )
+        )
+
+        clipped = run_pdk(self.tmp_path, "clip", "workout", "--context", cwd=project, env=env)
+        self.assertEqual(clipped.returncode, 0)
+        self.assertEqual(clipped.stdout, "")
+        self.assertIn("Copied workout", clipped.stderr)
+        clipboard = clip_file.read_text(encoding="utf-8")
+        self.assertIn("Plan: 20-minute recovery workout", clipboard)
+        self.assertIn("# Prompt Deck Session", clipboard)
+        self.assertIn("Sport training fact", clipboard)
+
+    def test_clip_prompt_with_context_errors_without_session_state(self):
+        project = self.tmp_path / "project"
+        project.mkdir()
+        self.assertEqual(run_pdk(self.tmp_path, "session", "init", cwd=project).returncode, 0)
+        self.assertEqual(run_pdk(self.tmp_path, "add", "workout", input="Plan body", cwd=project).returncode, 0)
+
+        clip_file = self.tmp_path / "missing-session-clipboard.txt"
+        env = fake_path_env(
+            self.tmp_path,
+            {
+                "pbcopy": '#!/bin/sh\ncat > "$PDK_CLIP_FILE"\n',
+            },
+            {"PDK_CLIP_FILE": str(clip_file)},
+        )
+
+        clipped = run_pdk(self.tmp_path, "clip", "workout", "--context", cwd=project, env=env)
+        self.assertEqual(clipped.returncode, 1)
+        self.assertEqual(clipped.stdout, "")
+        self.assertIn("session state not found", clipped.stderr)
+        self.assertFalse(clip_file.exists())
+
+    def test_session_clear_removes_only_saved_state(self):
+        project = self.tmp_path / "project"
+        project.mkdir()
+        self.assertEqual(run_pdk(self.tmp_path, "session", "init", cwd=project).returncode, 0)
+        (project / "context" / "base" / "profile.md").write_text("Base profile fact\n", encoding="utf-8")
+        (project / "context" / "sport" / "training.md").write_text("Sport training fact\n", encoding="utf-8")
+
+        built = run_pdk(self.tmp_path, "session", "build", "sport", cwd=project)
+        self.assertEqual(built.returncode, 0)
+        self.assertTrue((project / ".pdk" / "session.md").exists())
+
+        cleared = run_pdk(self.tmp_path, "session", "clear", cwd=project)
+        self.assertEqual(cleared.returncode, 0)
+        self.assertEqual(cleared.stdout, "")
+        self.assertIn("Cleared session state .pdk/session.md", cleared.stderr)
+        self.assertFalse((project / ".pdk" / "session.md").exists())
+        self.assertTrue((project / ".pdk" / "context.toml").exists())
+        self.assertTrue((project / "context" / "sport" / "training.md").exists())
+
+        shown = run_pdk(self.tmp_path, "session", "show", cwd=project)
+        self.assertEqual(shown.returncode, 1)
+        self.assertIn("session state not found", shown.stderr)
+
+        repeated = run_pdk(self.tmp_path, "session", "clear", cwd=project)
+        self.assertEqual(repeated.returncode, 0)
+        self.assertEqual(repeated.stdout, "")
+        self.assertIn("No session state to clear", repeated.stderr)
 
     def test_session_init_custom_root_and_config_errors(self):
         project = self.tmp_path / "project"

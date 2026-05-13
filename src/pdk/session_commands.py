@@ -14,7 +14,7 @@ from .file_workflows import index_paths
 from .interactive import Clipboard
 from .project import ProjectNotFoundError, ProjectResolver
 from .session_config import SessionConfig, load_session_config, write_starter_session_config
-from .session_state import load_session_state, save_session_state
+from .session_state import clear_session_state, load_session_state, save_session_state, session_state_path
 from .tokens import count_tokens
 
 
@@ -197,6 +197,16 @@ def cmd_session_show(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, st
     return 0
 
 
+def cmd_session_clear(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
+    project_root = _project_root_or_error()
+    state_path = session_state_path(project_root)
+    if clear_session_state(project_root):
+        _reporter(args, stderr).success(f"Cleared session state {_display_path(state_path, project_root)}")
+    else:
+        _reporter(args, stderr).warning("No session state to clear")
+    return 0
+
+
 def cmd_session_list(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
     project_root = _project_root_or_error()
     config = load_session_config(project_root)
@@ -300,6 +310,7 @@ def cmd_session_build(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, s
         save_session_state(project_root, rendered)
         _reporter(args, stderr).success(f"Wrote session {args.output}")
         return 0
-    save_session_state(project_root, rendered)
+    state_path = save_session_state(project_root, rendered)
     stdout.write(rendered)
+    _reporter(args, stderr).success(f"Saved session state {_display_path(state_path, project_root)}")
     return 0

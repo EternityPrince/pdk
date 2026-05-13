@@ -46,7 +46,7 @@ COMPLETION_COMMANDS = (
 
 def bash_completion() -> str:
     commands = " ".join(COMPLETION_COMMANDS)
-    session_commands = "init list build show"
+    session_commands = "init list build show clear"
     return f"""_pdk_complete()
 {{
     local cur prev
@@ -81,7 +81,8 @@ def zsh_completion() -> str:
     commands = " ".join(f"'{command}:pdk {command}'" for command in COMPLETION_COMMANDS)
     session_commands = (
         "'init:create starter context folders' 'list:list session modules' "
-        "'build:build session context' 'show:print last session context'"
+        "'build:build session context' 'show:print last session context' "
+        "'clear:delete last session context'"
     )
     return f"""#compdef pdk
 _pdk() {{
@@ -116,7 +117,7 @@ def fish_completion() -> str:
     return (
         f"{command_lines}\n"
         "complete -c pdk -f -n '__fish_seen_subcommand_from session; "
-        "and not __fish_seen_subcommand_from init list build show' -a 'init list build show'\n"
+        "and not __fish_seen_subcommand_from init list build show clear' -a 'init list build show clear'\n"
         f"complete -c pdk -f -n 'contains (commandline -opc)[2] {prompt_commands}' "
         """-a '(pdk list 2>/dev/null | awk "NR>1 {print \\$1}")'\n"""
     )

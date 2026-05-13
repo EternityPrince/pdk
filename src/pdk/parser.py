@@ -63,6 +63,7 @@ from .commands import (
     cmd_completions,
     cmd_context,
     cmd_session_build,
+    cmd_session_clear,
     cmd_session_init,
     cmd_session_list,
     cmd_session_show,
@@ -402,6 +403,7 @@ Examples:
     clip = subparsers.add_parser("clip", help="copy a prompt to the clipboard")
     clip.add_argument("name")
     clip.add_argument("--raw", action="store_true", help="copy template text without filling variables")
+    clip.add_argument("--context", action="store_true", help="append the last built pdk session context")
     clip.set_defaults(func=cmd_clip)
 
     use = subparsers.add_parser("use", help="copy a prompt to the clipboard")
@@ -854,7 +856,8 @@ Examples:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
             "Create, inspect, and build project-local Markdown context modules.\n"
-            "Build saves the latest session in .pdk/session.md so `pdk show NAME --context` can append it."
+            "Build saves the latest session in .pdk/session.md so `pdk show NAME --context` "
+            "or `pdk clip NAME --context` can append it."
         ),
         epilog="""
 Examples:
@@ -863,6 +866,8 @@ Examples:
   pdk session build sport
   pdk session show
   pdk show workout --context
+  pdk clip workout --context
+  pdk session clear
   pdk session build all --dry-run
 """,
     )
@@ -877,6 +882,13 @@ Examples:
 
     session_show = session_subparsers.add_parser("show", help="print the last built session context")
     session_show.set_defaults(func=cmd_session_show)
+
+    session_clear = session_subparsers.add_parser(
+        "clear",
+        help="delete the last built session context",
+        description="Delete .pdk/session.md without touching .pdk/context.toml or context folders.",
+    )
+    session_clear.set_defaults(func=cmd_session_clear)
 
     session_build = session_subparsers.add_parser(
         "build",

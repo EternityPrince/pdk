@@ -16,6 +16,7 @@ pdk session list
 pdk session build sport
 pdk list
 pdk show workout --context
+pdk clip workout --context
 pdk session build all --dry-run
 pdk audio --module work --heading "Inbox"
 pdk context client-a
@@ -61,17 +62,21 @@ pdk session build sport
 pdk session show
 pdk list
 pdk show workout --context
+pdk clip workout --context
+pdk session clear
 pdk session build all --dry-run
 ```
 
 `session build` saves the last built context in project state, and also prints it
 to stdout unless you use `--copy` or `--output`. `pdk session show` prints that
 saved context later. `pdk show NAME --context` first fills the prompt
-placeholders, then appends the saved session context after it. Use `--dry-run` to
-see modules, files, token estimate, and budget status without printing full file
-text. Use `--budget 12000` to warn when the package is too large, and `--redact`
-to mask emails, phone numbers, and other configured private data before saving or
-copying.
+placeholders, then appends the saved session context after it; `pdk clip NAME
+--context` does the same and copies the result to the clipboard. `pdk session
+clear` removes only the saved session state from `.pdk/session.md`. Use
+`--dry-run` to see modules, files, token estimate, and budget status without
+printing full file text. Use `--budget 12000` to warn when the package is too
+large, and `--redact` to mask emails, phone numbers, and other configured
+private data before saving or copying.
 
 Session settings live in project-local `.pdk/context.toml`:
 
@@ -233,6 +238,7 @@ AI context is the command you use during daily work:
 ```bash
 pdk session build sport
 pdk show workout --context
+pdk clip workout --context
 pdk session build all --dry-run
 pdk context client-a
 pdk context client-a --file README.md

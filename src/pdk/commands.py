@@ -43,7 +43,7 @@ from .project_commands import (
     cmd_project_unassign,
     cmd_project_use,
 )
-from .session_commands import cmd_session_build, cmd_session_init, cmd_session_list, cmd_session_show
+from .session_commands import cmd_session_build, cmd_session_clear, cmd_session_init, cmd_session_list, cmd_session_show
 from .prompt_commands import (
     cmd_add,
     cmd_browse,
@@ -124,6 +124,7 @@ __all__ = [
     "cmd_security_status",
     "cmd_security_unlock",
     "cmd_session_build",
+    "cmd_session_clear",
     "cmd_session_init",
     "cmd_session_list",
     "cmd_session_show",

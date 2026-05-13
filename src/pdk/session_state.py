@@ -19,6 +19,15 @@ def save_session_state(project_root: Path, markdown: str) -> Path:
     return path
 
 
+def clear_session_state(project_root: Path) -> bool:
+    path = session_state_path(project_root)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return False
+    return True
+
+
 def load_session_state(project_root: Path) -> str:
     path = session_state_path(project_root)
     try:

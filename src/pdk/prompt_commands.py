@@ -62,14 +62,18 @@ def cmd_show(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: Te
     prompt = store.get(args.name)
     rendered = _fill_variables(args, prompt.body, stdin, stderr)
     if getattr(args, "context", False):
-        context = _context(args)
-        if context.project_root is None:
-            raise CliError("session context requires a project; run `pdk session build MODULE` first")
-        rendered = rendered.rstrip() + "\n\n---\n\n" + load_session_state(context.project_root)
+        rendered = _append_session_context(args, rendered)
     stdout.write(rendered)
     _write_token_summary(prompt.body, rendered, stdout, stderr)
     store.record_usage(UsageAction.SHOW, [args.name])
     return 0
+
+
+def _append_session_context(args: argparse.Namespace, rendered: str) -> str:
+    context = _context(args)
+    if context.project_root is None:
+        raise CliError("session context requires a project; run `pdk session build MODULE` first")
+    return rendered.rstrip() + "\n\n---\n\n" + load_session_state(context.project_root)
 
 
 def _copy_prompt_to_clipboard(
@@ -82,6 +86,8 @@ def _copy_prompt_to_clipboard(
     detail: str,
 ) -> None:
     body = prompt.body if getattr(args, "raw", False) else _fill_variables(args, prompt.body, stdin, stderr)
+    if getattr(args, "context", False):
+        body = _append_session_context(args, body)
     try:
         copied = Clipboard().copy(body)
     except subprocess.CalledProcessError as exc:
