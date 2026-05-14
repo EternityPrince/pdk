@@ -8,6 +8,15 @@ It is built around three everyday workflows:
 2. Prepare safe AI context.
 3. Index and digest files.
 
+## Documentation
+
+- [Quickstart](docs/quickstart.md)
+- [Daily workflows](docs/daily-workflows.md)
+- [Data locations](docs/data-locations.md)
+- [Privacy model](docs/privacy-model.md)
+- [Backup and restore](docs/backup-restore.md)
+- [Model setup](docs/model-setup.md)
+
 ```bash
 ./scripts/install.sh
 pdk add review --tag refactor < review.md
@@ -285,6 +294,7 @@ pdk stats use
 pdk stats mem
 pdk usage
 pdk doctor
+pdk doctor --system
 pdk duplicates
 pdk stale --days 30
 pdk rename old-name new-name

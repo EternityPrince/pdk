@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +15,7 @@ from .project import ProjectNotFoundError, ProjectResolver
 from .security import SecurityError, secret_warnings
 from .sources import SourceError, TextSource, read_sources
 from .store import NamedProjectNotFoundError, NoteNotFoundError, PromptNotFoundError, PromptStore
+from .system_adapters import current_system_adapter
 from .summary import SummaryModelError
 from .tokens import token_summary
 from .ui import StatusReporter
@@ -145,11 +145,12 @@ def _read_text_sources(args: argparse.Namespace, stdin: TextIO) -> list[TextSour
 
 
 def _read_clipboard() -> str:
-    if shutil.which("pbpaste") is None:
+    command = current_system_adapter().clipboard_paste_command()
+    if command is None:
         raise CliError("clipboard command is not available")
     try:
         result = subprocess.run(
-            ["pbpaste"],
+            list(command.args),
             text=True,
             capture_output=True,
             check=True,

@@ -529,10 +529,12 @@ def _register_prompt_hygiene_commands(subparsers) -> None:
         epilog="""
 Examples:
   pdk doctor
+  pdk doctor --system
   pdk doctor --project client-a
   pdk doctor --days 180
 """,
     )
+    doctor.add_argument("--system", action="store_true", help="show system dependencies, paths, and adapters")
     doctor.add_argument("--project", help="check a named project")
     doctor.add_argument("--no-project", action="store_true", help="check unbound prompts and notes")
     doctor.add_argument("--days", type=int, default=90, help="stale threshold in days")

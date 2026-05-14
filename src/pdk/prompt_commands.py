@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import shutil
 import subprocess
 from pathlib import Path
 from typing import TextIO
@@ -23,10 +22,13 @@ from .completions import bash_completion, fish_completion, zsh_completion
 from .editor import TextEditor
 from .file_index import FileIndex
 from .interactive import Clipboard, InteractiveBrowser
+from .model_loader import model_cache_dir, resolve_summary_model
 from .models import Prompt, PromptStats, UsageAction
+from .privacy import privacy_config_paths
 from .prompt_hygiene import duplicate_groups, stale_prompts
 from .session_state import load_session_state
 from .store import PromptExistsError, PromptStore
+from .system_adapters import current_system_adapter
 from .tokens import count_tokens
 from .ui import ConsoleStyle, PromptFormatter
 
@@ -321,6 +323,8 @@ def _prompt_scope(args: argparse.Namespace, store: PromptStore) -> tuple[list[Pr
 
 
 def cmd_doctor(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
+    if getattr(args, "system", False):
+        return _cmd_system_doctor(args, stdout)
     context = _context(args)
     store = PromptStore(context.database_path)
     prompts, stats_by_name = _prompt_scope(args, store)
@@ -353,6 +357,40 @@ def cmd_doctor(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: 
         context_config = Path(context.project_root) / ".pdk" / "context.toml"
         if not context_config.exists():
             stdout.write("- No context config found. Run: pdk project init\n")
+    return 0
+
+
+def _availability(value: bool) -> str:
+    return "yes" if value else "no"
+
+
+def _command_label(command) -> str:
+    return command.label if command is not None else "-"
+
+
+def _cmd_system_doctor(args: argparse.Namespace, stdout: TextIO) -> int:
+    context = _context(args)
+    adapter = current_system_adapter()
+    index = FileIndex()
+    summary_model = resolve_summary_model("mlx-community/gemma-3-text-4b-it-4bit")
+    stdout.write("System\n")
+    stdout.write(f"adapter\t{adapter.name}\n")
+    stdout.write(f"runtime\t{adapter.runtime_label()}\n")
+    stdout.write(f"selected_database\t{context.database_path}\n")
+    stdout.write(f"scope\t{context.scope}\n")
+    stdout.write(f"project_root\t{context.project_root or '-'}\n")
+    stdout.write(f"global_database\t{PromptStore().path}\n")
+    stdout.write(f"file_index\t{index.path}\n")
+    stdout.write(f"privacy_configs\t{', '.join(str(path) for path in privacy_config_paths()) or '-'}\n")
+    stdout.write(f"clipboard_copy\t{_command_label(adapter.clipboard_copy_command())}\n")
+    stdout.write(f"clipboard_paste\t{_command_label(adapter.clipboard_paste_command())}\n")
+    stdout.write(f"fzf\t{_command_label(adapter.fzf_command())}\n")
+    stdout.write(f"model_cache_dir\t{model_cache_dir() or '-'}\n")
+    stdout.write(f"summary_model\t{summary_model}\n")
+    stdout.write(f"extra_files\t{_availability(adapter.python_module_available('fitz'))}\n")
+    stdout.write(f"extra_audio\t{_availability(adapter.python_module_available('faster_whisper'))}\n")
+    stdout.write(f"extra_ml\t{_availability(adapter.python_module_available('transformers'))}\n")
+    stdout.write(f"extra_summary\t{_availability(adapter.python_module_available('mlx_lm'))}\n")
     return 0
 
 
@@ -449,7 +487,8 @@ def cmd_feedback(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr
 
 
 def _run_fzf(prompts: list[Prompt]) -> str | None:
-    if shutil.which("fzf") is None:
+    command = current_system_adapter().fzf_command()
+    if command is None:
         raise CliError("fzf is not installed")
     lines = [
         "\t".join(
@@ -463,7 +502,7 @@ def _run_fzf(prompts: list[Prompt]) -> str | None:
     ]
     try:
         result = subprocess.run(
-            ["fzf", "--with-nth=1,2,3", "--delimiter=\t"],
+            [*command.args, "--with-nth=1,2,3", "--delimiter=\t"],
             input="\n".join(lines),
             text=True,
             capture_output=True,

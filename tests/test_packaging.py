@@ -48,3 +48,16 @@ def test_readme_documents_v02_context_workflow():
     assert "pdk context --profile default --copy" in readme
     assert "`pdk context` is the lower-level, universal context builder" in readme
     assert "`pdk export` is different again" in readme
+
+
+def test_v1_docs_are_split_by_topic():
+    expected = (
+        "quickstart.md",
+        "daily-workflows.md",
+        "data-locations.md",
+        "privacy-model.md",
+        "backup-restore.md",
+        "model-setup.md",
+    )
+    for name in expected:
+        assert (ROOT / "docs" / name).exists()

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import shutil
 import subprocess
 from dataclasses import dataclass
 from typing import TextIO
@@ -8,6 +7,7 @@ from typing import TextIO
 from .editor import TextEditor
 from .models import Prompt, TagSet, UsageAction
 from .store import PromptStore
+from .system_adapters import CommandSpec, current_system_adapter
 from .tokens import count_tokens, token_summary
 from .ui import ColorMode, ConsoleStyle, PromptFormatter
 from .variables import VariablePrompter
@@ -54,16 +54,18 @@ class BrowserState:
 
 
 class Clipboard:
-    def __init__(self, command: str = "pbcopy") -> None:
-        self._command = command
+    def __init__(self, command: str | CommandSpec | None = None) -> None:
+        if isinstance(command, str):
+            command = CommandSpec((command,))
+        self._command = command or current_system_adapter().clipboard_copy_command()
 
     def available(self) -> bool:
-        return shutil.which(self._command) is not None
+        return self._command is not None and current_system_adapter().command_exists(self._command.executable)
 
     def copy(self, text: str) -> bool:
-        if not self.available():
+        if not self.available() or self._command is None:
             return False
-        subprocess.run([self._command], input=text, text=True, check=True)
+        subprocess.run(list(self._command.args), input=text, text=True, check=True)
         return True
 
 
@@ -297,7 +299,7 @@ class InteractiveBrowser:
         self._line("  Enter/o  show full prompt body again")
         self._line("  n/p      next or previous prompt in the active list")
         self._line("  /text    search and jump to the first match")
-        self._line("  c        copy raw prompt body with pbcopy when available")
+        self._line("  c        copy raw prompt body with the system clipboard command when available")
         self._line("  cf       fill variables, then copy the rendered prompt")
         self._line("  print    print full prompt body")
         self._line("  e  edit prompt in $EDITOR")
