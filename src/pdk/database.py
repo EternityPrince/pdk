@@ -180,6 +180,24 @@ class SQLiteDatabase:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS command_usage_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    command TEXT NOT NULL,
+                    variant TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    used_at TEXT NOT NULL,
+                    detail TEXT
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_command_usage_variant ON command_usage_events(variant)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_command_usage_used_at ON command_usage_events(used_at)"
+            )
 
 
 def default_home() -> Path:

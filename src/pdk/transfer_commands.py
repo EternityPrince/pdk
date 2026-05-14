@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TextIO
@@ -152,14 +153,45 @@ def _write_markdown_export(
         includes=includes,
         since=since,
     )
-    prompts = data["prompts"]
-    notes = data["notes"]
-    projects = data["projects"]
-    comments_by_prompt = data["comments_by_prompt"]
-    versions_by_prompt = data["versions_by_prompt"]
-    note_versions_by_id = data["note_versions_by_id"]
-    usage = data["usage"]
+    _write_markdown_header(
+        store,
+        stdout,
+        project_filter=project_filter,
+        project_name=project_name,
+        includes=includes,
+        since=since,
+        index=data["index"],
+    )
+    _write_markdown_prompt_index(stdout, data["prompts"])
+    _write_markdown_projects(stdout, data["projects"], redact=redact)
+    _write_markdown_prompts(
+        stdout,
+        data["prompts"],
+        data["comments_by_prompt"],
+        data["versions_by_prompt"],
+        includes=includes,
+        redact=redact,
+    )
+    _write_markdown_notes(
+        stdout,
+        data["notes"],
+        data["note_versions_by_id"],
+        includes=includes,
+        redact=redact,
+    )
+    _write_markdown_usage(stdout, data["usage"], includes=includes)
 
+
+def _write_markdown_header(
+    store: PromptStore,
+    stdout: TextIO,
+    *,
+    project_filter: bool,
+    project_name: str | None,
+    includes: set[str],
+    since: str | None,
+    index: dict[str, int],
+) -> None:
     stdout.write("# Prompt Deck Export\n\n")
     stdout.write("## Metadata\n\n")
     stdout.write(f"- database: `{store.path}`\n")
@@ -173,12 +205,14 @@ def _write_markdown_export(
     stdout.write("\n")
 
     stdout.write("## Index\n\n")
-    index = data["index"]
     stdout.write(
         f"- projects: {index['projects']}; prompts: {index['prompts']}; "
         f"notes: {index['notes']}; comments: {index['comments']}; "
         f"versions: {index['versions']}; usage: {index['usage']}\n\n"
     )
+
+
+def _write_markdown_prompt_index(stdout: TextIO, prompts) -> None:
     if prompts:
         stdout.write("| prompt | project | tags | updated |\n")
         stdout.write("| --- | --- | --- | --- |\n")
@@ -190,6 +224,8 @@ def _write_markdown_export(
         stdout.write("\n")
     stdout.write("\n")
 
+
+def _write_markdown_projects(stdout: TextIO, projects, *, redact: bool) -> None:
     stdout.write("## Projects\n\n")
     if projects:
         for project in sorted(projects, key=lambda item: item.name.casefold()):
@@ -202,78 +238,102 @@ def _write_markdown_export(
     else:
         stdout.write("_No projects in scope._\n\n")
 
+
+def _write_markdown_prompts(
+    stdout: TextIO,
+    prompts,
+    comments_by_prompt: dict[str, list],
+    versions_by_prompt: dict[str, list],
+    *,
+    includes: set[str],
+    redact: bool,
+) -> None:
     stdout.write("## Prompts\n\n")
     if not prompts:
         stdout.write("_No prompts in scope._\n\n")
     for prompt in sorted(prompts, key=lambda item: item.name.casefold()):
-        stdout.write(f"### {prompt.name}\n\n")
-        stdout.write(f"- project: {prompt.project_name or 'unbound'}\n")
-        stdout.write(f"- tags: {', '.join(prompt.tags) or '-'}\n")
-        stdout.write(f"- created_at: {prompt.created_at}\n")
-        stdout.write(f"- updated_at: {prompt.updated_at}\n\n")
-        stdout.write("```text\n")
-        prompt_body = redact_text(prompt.body) if redact else prompt.body
-        stdout.write(prompt_body)
-        if not prompt_body.endswith("\n"):
-            stdout.write("\n")
-        stdout.write("```\n\n")
-
+        _write_markdown_prompt(stdout, prompt, redact=redact)
         if "comments" in includes:
-            feedback_items = comments_by_prompt[prompt.name]
-            stdout.write("#### Comments\n\n")
-            if feedback_items:
-                for item in feedback_items:
-                    body = redact_text(item.body) if redact else item.body
-                    stdout.write(f"- {item.created_at} [{item.id}]: {_md_escape(body)}\n")
-            else:
-                stdout.write("_No comments._\n")
-            stdout.write("\n")
-
+            _write_markdown_comments(stdout, comments_by_prompt[prompt.name], redact=redact)
         if "versions" in includes:
-            versions = versions_by_prompt[prompt.name]
-            stdout.write("#### Versions\n\n")
-            if versions:
-                for version in versions:
-                    stdout.write(f"- {version.created_at} [{version.id}] {version.reason}\n\n")
-                    stdout.write("```text\n")
-                    version_body = redact_text(version.body) if redact else version.body
-                    stdout.write(version_body)
-                    if not version_body.endswith("\n"):
-                        stdout.write("\n")
-                    stdout.write("```\n\n")
-            else:
-                stdout.write("_No previous versions._\n\n")
+            _write_markdown_versions(stdout, versions_by_prompt[prompt.name], redact=redact)
 
+
+def _write_markdown_prompt(stdout: TextIO, prompt, *, redact: bool) -> None:
+    stdout.write(f"### {prompt.name}\n\n")
+    stdout.write(f"- project: {prompt.project_name or 'unbound'}\n")
+    stdout.write(f"- tags: {', '.join(prompt.tags) or '-'}\n")
+    stdout.write(f"- created_at: {prompt.created_at}\n")
+    stdout.write(f"- updated_at: {prompt.updated_at}\n\n")
+    _write_fenced_text(stdout, redact_text(prompt.body) if redact else prompt.body)
+
+
+def _write_fenced_text(stdout: TextIO, body: str) -> None:
+    stdout.write("```text\n")
+    stdout.write(body)
+    if not body.endswith("\n"):
+        stdout.write("\n")
+    stdout.write("```\n\n")
+
+
+def _write_markdown_comments(stdout: TextIO, feedback_items, *, redact: bool) -> None:
+    stdout.write("#### Comments\n\n")
+    if feedback_items:
+        for item in feedback_items:
+            body = redact_text(item.body) if redact else item.body
+            stdout.write(f"- {item.created_at} [{item.id}]: {_md_escape(body)}\n")
+    else:
+        stdout.write("_No comments._\n")
+    stdout.write("\n")
+
+
+def _write_markdown_versions(stdout: TextIO, versions, *, redact: bool) -> None:
+    stdout.write("#### Versions\n\n")
+    if not versions:
+        stdout.write("_No previous versions._\n\n")
+        return
+    for version in versions:
+        stdout.write(f"- {version.created_at} [{version.id}] {version.reason}\n\n")
+        _write_fenced_text(stdout, redact_text(version.body) if redact else version.body)
+
+
+def _write_markdown_notes(
+    stdout: TextIO,
+    notes,
+    note_versions_by_id: dict[int, list],
+    *,
+    includes: set[str],
+    redact: bool,
+) -> None:
     if "notes" in includes:
         stdout.write("## Notes\n\n")
         if not notes:
             stdout.write("_No notes in scope._\n\n")
         for note in notes:
-            stdout.write(f"### {note.title or 'Untitled note'} [{note.id}]\n\n")
-            stdout.write(f"- project: {note.project_name or 'unbound'}\n")
-            stdout.write(f"- created_at: {note.created_at}\n")
-            stdout.write(f"- updated_at: {note.updated_at}\n\n")
-            stdout.write("```text\n")
-            note_body = redact_text(note.body) if redact else note.body
-            stdout.write(note_body)
-            if not note_body.endswith("\n"):
-                stdout.write("\n")
-            stdout.write("```\n\n")
+            _write_markdown_note(stdout, note, redact=redact)
             if "versions" in includes:
-                versions = note_versions_by_id[note.id]
-                stdout.write("#### Note Versions\n\n")
-                if versions:
-                    for version in versions:
-                        stdout.write(f"- {version.created_at} [{version.id}] {version.title or '-'}\n\n")
-                        stdout.write("```text\n")
-                        version_body = redact_text(version.body) if redact else version.body
-                        stdout.write(version_body)
-                        if not version_body.endswith("\n"):
-                            stdout.write("\n")
-                        stdout.write("```\n\n")
-                else:
-                    stdout.write("_No previous versions._\n\n")
+                _write_markdown_note_versions(stdout, note_versions_by_id[note.id], redact=redact)
 
+
+def _write_markdown_note(stdout: TextIO, note, *, redact: bool) -> None:
+    stdout.write(f"### {note.title or 'Untitled note'} [{note.id}]\n\n")
+    stdout.write(f"- project: {note.project_name or 'unbound'}\n")
+    stdout.write(f"- created_at: {note.created_at}\n")
+    stdout.write(f"- updated_at: {note.updated_at}\n\n")
+    _write_fenced_text(stdout, redact_text(note.body) if redact else note.body)
+
+
+def _write_markdown_note_versions(stdout: TextIO, versions, *, redact: bool) -> None:
+    stdout.write("#### Note Versions\n\n")
+    if not versions:
+        stdout.write("_No previous versions._\n\n")
+        return
+    for version in versions:
+        stdout.write(f"- {version.created_at} [{version.id}] {version.title or '-'}\n\n")
+        _write_fenced_text(stdout, redact_text(version.body) if redact else version.body)
+
+
+def _write_markdown_usage(stdout: TextIO, usage, *, includes: set[str]) -> None:
     if "usage" in includes:
         stdout.write("## Usage Timeline\n\n")
         if usage:
@@ -400,6 +460,13 @@ class ImportSummary:
             f"{self.notes} note(s), {self.comments} comment(s), "
             f"{self.versions} version(s), {self.usage} usage event(s); skipped {self.skipped}"
         )
+
+
+@dataclass
+class ImportState:
+    descriptions: dict[str, str]
+    planned_projects: set[str]
+    available_prompt_names: set[str]
 
 
 def _read_import_text(args: argparse.Namespace, stdin: TextIO) -> str:
@@ -561,104 +628,175 @@ def _import_json_payload(
 ) -> ImportSummary:
     descriptions = _import_project_descriptions(payload)
     summary = ImportSummary()
-    planned_projects: set[str] = set()
-    available_prompt_names = {prompt.name for prompt in store.list()}
+    state = ImportState(descriptions, set(), {prompt.name for prompt in store.list()})
 
-    for name in sorted(descriptions):
-        _project_id_for_import(store, name, descriptions, planned_projects, summary, dry_run=dry_run)
-
-    for item in payload.get("prompts", []):
-        if not isinstance(item, dict):
-            summary.skipped += 1
-            continue
-        name = str(item.get("name") or "").strip()
-        body = item.get("body")
-        if not name or body is None:
-            summary.skipped += 1
-            continue
-        project_name = _project_name_from_value(item.get("project_name"))
-        project_id = _project_id_for_import(
-            store,
-            project_name,
-            descriptions,
-            planned_projects,
-            summary,
-            dry_run=dry_run,
-        )
-        exists = _prompt_exists(store, name)
-        if exists and not replace:
-            summary.skipped += 1
-            continue
-        summary.prompts += 1
-        available_prompt_names.add(name)
-        if not dry_run:
-            now = datetime.now().isoformat()
-            store.import_prompt(
-                name,
-                str(body),
-                tags=item.get("tags") or (),
-                project_id=project_id,
-                created_at=str(item.get("created_at") or now),
-                updated_at=str(item.get("updated_at") or now),
-                replace=exists or replace,
-            )
-        _import_prompt_versions(store, name, item.get("versions"), summary, dry_run=dry_run)
-        for comment in item.get("comments", []):
-            if not isinstance(comment, dict) or comment.get("body") is None:
-                summary.skipped += 1
-                continue
-            summary.comments += 1
-            if not dry_run:
-                store.import_feedback(
-                    name,
-                    str(comment["body"]),
-                    str(comment.get("created_at") or datetime.now().isoformat()),
-                )
-
-    for item in payload.get("notes", []):
-        if not isinstance(item, dict):
-            summary.skipped += 1
-            continue
-        body = item.get("body")
-        if body is None:
-            summary.skipped += 1
-            continue
-        title = item.get("title")
-        project_name = _project_name_from_value(item.get("project_name"))
-        project_id = _project_id_for_import(
-            store,
-            project_name,
-            descriptions,
-            planned_projects,
-            summary,
-            dry_run=dry_run,
-        )
-        note_title = str(title) if title is not None else None
-        note_body = str(body)
-        if not dry_run and _note_exists(store, project_id=project_id, title=note_title, body=note_body):
-            summary.skipped += 1
-            continue
-        summary.notes += 1
-        imported_note_id: int | None = None
-        if not dry_run:
-            imported_note_id = store.add_note(note_body, title=note_title, project_id=project_id).id
-        if dry_run:
-            for version in item.get("versions") or []:
-                if isinstance(version, dict) and version.get("body") is not None:
-                    summary.versions += 1
-                else:
-                    summary.skipped += 1
-        elif imported_note_id is not None:
-            _import_note_versions(store, imported_note_id, item.get("versions"), summary, dry_run=False)
-
+    _import_declared_projects(store, state, summary, dry_run=dry_run)
+    _import_prompts(store, payload.get("prompts"), state, summary, replace=replace, dry_run=dry_run)
+    _import_notes(store, payload.get("notes"), state, summary, dry_run=dry_run)
     _import_usage_events(
         store,
         payload.get("usage"),
         summary,
-        available_prompt_names=available_prompt_names,
+        available_prompt_names=state.available_prompt_names,
         dry_run=dry_run,
     )
     return summary
+
+
+def _import_declared_projects(
+    store: PromptStore,
+    state: ImportState,
+    summary: ImportSummary,
+    *,
+    dry_run: bool,
+) -> None:
+    for name in sorted(state.descriptions):
+        _project_id_for_import(
+            store,
+            name,
+            state.descriptions,
+            state.planned_projects,
+            summary,
+            dry_run=dry_run,
+        )
+
+
+def _import_prompts(
+    store: PromptStore,
+    items: Any,
+    state: ImportState,
+    summary: ImportSummary,
+    *,
+    replace: bool,
+    dry_run: bool,
+) -> None:
+    for item in items or []:
+        _import_prompt_item(store, item, state, summary, replace=replace, dry_run=dry_run)
+
+
+def _import_prompt_item(
+    store: PromptStore,
+    item: Any,
+    state: ImportState,
+    summary: ImportSummary,
+    *,
+    replace: bool,
+    dry_run: bool,
+) -> None:
+    if not isinstance(item, dict):
+        summary.skipped += 1
+        return
+    name = str(item.get("name") or "").strip()
+    body = item.get("body")
+    if not name or body is None:
+        summary.skipped += 1
+        return
+    project_id = _project_id_for_import(
+        store,
+        _project_name_from_value(item.get("project_name")),
+        state.descriptions,
+        state.planned_projects,
+        summary,
+        dry_run=dry_run,
+    )
+    exists = _prompt_exists(store, name)
+    if exists and not replace:
+        summary.skipped += 1
+        return
+    summary.prompts += 1
+    state.available_prompt_names.add(name)
+    if not dry_run:
+        now = datetime.now().isoformat()
+        store.import_prompt(
+            name,
+            str(body),
+            tags=item.get("tags") or (),
+            project_id=project_id,
+            created_at=str(item.get("created_at") or now),
+            updated_at=str(item.get("updated_at") or now),
+            replace=exists or replace,
+        )
+    _import_prompt_versions(store, name, item.get("versions"), summary, dry_run=dry_run)
+    _import_prompt_comments(store, name, item.get("comments"), summary, dry_run=dry_run)
+
+
+def _import_prompt_comments(
+    store: PromptStore,
+    prompt_name: str,
+    comments: Any,
+    summary: ImportSummary,
+    *,
+    dry_run: bool,
+) -> None:
+    for comment in comments or []:
+        if not isinstance(comment, dict) or comment.get("body") is None:
+            summary.skipped += 1
+            continue
+        summary.comments += 1
+        if not dry_run:
+            store.import_feedback(
+                prompt_name,
+                str(comment["body"]),
+                str(comment.get("created_at") or datetime.now().isoformat()),
+            )
+
+
+def _import_notes(
+    store: PromptStore,
+    items: Any,
+    state: ImportState,
+    summary: ImportSummary,
+    *,
+    dry_run: bool,
+) -> None:
+    for item in items or []:
+        _import_note_item(store, item, state, summary, dry_run=dry_run)
+
+
+def _import_note_item(
+    store: PromptStore,
+    item: Any,
+    state: ImportState,
+    summary: ImportSummary,
+    *,
+    dry_run: bool,
+) -> None:
+    if not isinstance(item, dict):
+        summary.skipped += 1
+        return
+    body = item.get("body")
+    if body is None:
+        summary.skipped += 1
+        return
+    project_id = _project_id_for_import(
+        store,
+        _project_name_from_value(item.get("project_name")),
+        state.descriptions,
+        state.planned_projects,
+        summary,
+        dry_run=dry_run,
+    )
+    note_title = str(item["title"]) if item.get("title") is not None else None
+    note_body = str(body)
+    if not dry_run and _note_exists(store, project_id=project_id, title=note_title, body=note_body):
+        summary.skipped += 1
+        return
+    summary.notes += 1
+    imported_note_id: int | None = None
+    if not dry_run:
+        imported_note_id = store.add_note(note_body, title=note_title, project_id=project_id).id
+    if dry_run:
+        _count_dry_run_note_versions(item.get("versions"), summary)
+    elif imported_note_id is not None:
+        _import_note_versions(store, imported_note_id, item.get("versions"), summary, dry_run=False)
+
+
+def _count_dry_run_note_versions(versions: Any, summary: ImportSummary) -> None:
+    for version in versions or []:
+        if isinstance(version, dict) and version.get("body") is not None:
+            summary.versions += 1
+        else:
+            summary.skipped += 1
 
 
 def _metadata_value(lines: list[str], key: str) -> str | None:
@@ -680,6 +818,63 @@ def _fenced_text(lines: list[str]) -> str:
     return ""
 
 
+def _markdown_item_kind(section: str | None) -> str | None:
+    if section == "Projects":
+        return "project"
+    if section == "Prompts":
+        return "prompt"
+    if section == "Notes":
+        return "note"
+    return None
+
+
+def _markdown_project_payload(title: str, body_lines: list[str]) -> dict[str, Any]:
+    return {
+        "name": title,
+        "description": _metadata_value(body_lines, "description") or "",
+    }
+
+
+def _markdown_prompt_payload(title: str, body_lines: list[str]) -> dict[str, Any]:
+    tags = _metadata_value(body_lines, "tags") or "-"
+    return {
+        "name": title,
+        "project_name": _project_name_from_value(_metadata_value(body_lines, "project")),
+        "tags": [] if tags == "-" else [part.strip() for part in tags.split(",")],
+        "body": _fenced_text(body_lines),
+    }
+
+
+def _markdown_note_payload(title: str, body_lines: list[str]) -> dict[str, Any]:
+    match = _NOTE_TITLE_RE.match(title)
+    note_title = match.group("title") if match else title
+    if note_title == "Untitled note":
+        note_title = None
+    return {
+        "title": note_title,
+        "project_name": _project_name_from_value(_metadata_value(body_lines, "project")),
+        "body": _fenced_text(body_lines),
+    }
+
+
+def _finish_markdown_item(
+    current: tuple[str, str, list[str]] | None,
+    *,
+    projects: list[dict[str, Any]],
+    prompts: list[dict[str, Any]],
+    notes: list[dict[str, Any]],
+) -> None:
+    if current is None:
+        return
+    kind, title, body_lines = current
+    if kind == "project":
+        projects.append(_markdown_project_payload(title, body_lines))
+    elif kind == "prompt":
+        prompts.append(_markdown_prompt_payload(title, body_lines))
+    elif kind == "note":
+        notes.append(_markdown_note_payload(title, body_lines))
+
+
 def _parse_markdown_export(text: str) -> dict[str, Any]:
     lines = text.splitlines()
     if not lines or lines[0].strip() != "# Prompt Deck Export":
@@ -691,66 +886,29 @@ def _parse_markdown_export(text: str) -> dict[str, Any]:
     section: str | None = None
     current: tuple[str, str, list[str]] | None = None
 
-    def finish() -> None:
-        nonlocal current
-        if current is None:
-            return
-        kind, title, body_lines = current
-        if kind == "project":
-            projects.append(
-                {
-                    "name": title,
-                    "description": _metadata_value(body_lines, "description") or "",
-                }
-            )
-        elif kind == "prompt":
-            tags = _metadata_value(body_lines, "tags") or "-"
-            prompts.append(
-                {
-                    "name": title,
-                    "project_name": _project_name_from_value(_metadata_value(body_lines, "project")),
-                    "tags": [] if tags == "-" else [part.strip() for part in tags.split(",")],
-                    "body": _fenced_text(body_lines),
-                }
-            )
-        elif kind == "note":
-            match = _NOTE_TITLE_RE.match(title)
-            note_title = match.group("title") if match else title
-            if note_title == "Untitled note":
-                note_title = None
-            notes.append(
-                {
-                    "title": note_title,
-                    "project_name": _project_name_from_value(_metadata_value(body_lines, "project")),
-                    "body": _fenced_text(body_lines),
-                }
-            )
-        current = None
-
     for line in lines[1:]:
         match = _HEADING_RE.match(line)
         if match:
             level, title = match.groups()
             if level == "##":
-                finish()
+                _finish_markdown_item(current, projects=projects, prompts=prompts, notes=notes)
+                current = None
                 section = title
                 continue
             if level == "###":
-                finish()
-                if section == "Projects":
-                    current = ("project", title, [])
-                elif section == "Prompts":
-                    current = ("prompt", title, [])
-                elif section == "Notes":
-                    current = ("note", title, [])
+                _finish_markdown_item(current, projects=projects, prompts=prompts, notes=notes)
+                current = None
+                kind = _markdown_item_kind(section)
+                if kind:
+                    current = (kind, title, [])
                 continue
             if level == "####":
-                finish()
+                _finish_markdown_item(current, projects=projects, prompts=prompts, notes=notes)
                 current = None
                 continue
         if current is not None:
             current[2].append(line)
-    finish()
+    _finish_markdown_item(current, projects=projects, prompts=prompts, notes=notes)
     return {"projects": projects, "prompts": prompts, "notes": notes}
 
 

@@ -61,6 +61,25 @@ def _extract_docx(path: Path) -> str:
     return "".join(parts).strip()
 
 
+def _extract_epub_zip_html(path: Path, parser) -> str:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = sorted(
+                name
+                for name in archive.namelist()
+                if name.lower().endswith((".html", ".htm", ".xhtml"))
+            )
+            parts = []
+            for name in names:
+                soup = parser(archive.read(name), "html.parser")
+                text = soup.get_text("\n", strip=True)
+                if text:
+                    parts.append(text)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise SourceError(f"could not read EPUB text from {path}") from exc
+    return "\n\n".join(parts).strip()
+
+
 def _extract_epub(path: Path) -> str:
     try:
         import ebooklib
@@ -77,6 +96,9 @@ def _extract_epub(path: Path) -> str:
             if text:
                 parts.append(text)
     except Exception as exc:
+        fallback = _extract_epub_zip_html(path, BeautifulSoup)
+        if fallback:
+            return fallback
         raise SourceError(f"could not read EPUB text from {path}") from exc
     return "\n\n".join(part for part in parts if part.strip()).strip()
 

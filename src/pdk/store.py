@@ -201,6 +201,8 @@ class PromptStore:
         )
         return event_id
 
+    # Project operations
+
     def create_project(self, name: str, description: str = "") -> Project:
         draft = ProjectDraft(name=name, description=description)
         now = self._db.now()
@@ -388,6 +390,8 @@ class PromptStore:
             for name in names:
                 self._record_usage(conn, UsageAction.MOVE, [name], detail=project_name or "unbound")
 
+    # Prompt operations
+
     def add(
         self,
         name: str,
@@ -538,6 +542,8 @@ class PromptStore:
                 raise PromptNotFoundError(name)
             return self._prompt_from_row(conn, row)
 
+    # Tags and prompt statistics
+
     def list(
         self,
         *,
@@ -685,6 +691,8 @@ class PromptStore:
             )
             for row in rows
         ]
+
+    # Usage, versions, and feedback
 
     def usage(
         self,
@@ -864,6 +872,8 @@ class PromptStore:
                 (name, body, created_at, reason.value),
             )
 
+    # Notes
+
     def add_note(self, body: str, *, title: str | None = None, project_id: int | None = None) -> Note:
         draft = NoteDraft(body=body, title=title, project_id=project_id)
         now = self._db.now()
@@ -994,6 +1004,8 @@ class PromptStore:
             )
             for row in rows
         ]
+
+    # Destructive prompt operations
 
     def remove(self, name: str) -> None:
         with self._db.connect() as conn:

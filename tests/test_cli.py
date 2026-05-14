@@ -1,79 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
-import subprocess
-import sys
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
 
 from pdk.tokens import count_tokens
-
-
-ROOT = Path(__file__).resolve().parents[1]
-FAKE_EDITOR = r"""
-from pathlib import Path
-import os
-import sys
-
-path = Path(sys.argv[-1])
-values = os.environ["PDK_FAKE_EDITOR_VALUES"].split("\x1e")
-state = Path(os.environ["PDK_FAKE_EDITOR_STATE"])
-index = int(state.read_text(encoding="utf-8")) if state.exists() else 0
-path.write_text(values[index], encoding="utf-8")
-state.write_text(str(index + 1), encoding="utf-8")
-"""
-
-
-def run_pdk(
-    tmp_path: Path,
-    *args: str,
-    input: str | None = None,
-    env: dict[str, str] | None = None,
-    cwd: Path | None = None,
-):
-    full_env = os.environ.copy()
-    full_env["PDK_HOME"] = str(tmp_path / "pdk-home")
-    full_env["PYTHONPATH"] = str(ROOT / "src") + os.pathsep + full_env.get("PYTHONPATH", "")
-    if env:
-        full_env.update(env)
-
-    return subprocess.run(
-        [sys.executable, "-m", "pdk.cli", *args],
-        input=input,
-        text=True,
-        capture_output=True,
-        env=full_env,
-        cwd=cwd,
-        check=False,
-    )
-
-
-def editor_env(tmp_path: Path, values: list[str]) -> dict[str, str]:
-    editor = tmp_path / "fake_editor.py"
-    editor.write_text(FAKE_EDITOR, encoding="utf-8")
-    state = tmp_path / "fake_editor_state.txt"
-    return {
-        "EDITOR": f"{sys.executable} {editor}",
-        "PDK_FAKE_EDITOR_VALUES": "\x1e".join(values),
-        "PDK_FAKE_EDITOR_STATE": str(state),
-    }
-
-
-def fake_path_env(tmp_path: Path, commands: dict[str, str], extra: dict[str, str] | None = None) -> dict[str, str]:
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir(exist_ok=True)
-    for name, body in commands.items():
-        path = bin_dir / name
-        path.write_text(body, encoding="utf-8")
-        path.chmod(0o755)
-    env = {"PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", "")}
-    if extra:
-        env.update(extra)
-    return env
+from tests.helpers import editor_env, fake_path_env, run_pdk
 
 
 class CliTest(unittest.TestCase):
@@ -83,56 +17,6 @@ class CliTest(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
-
-    def test_packaging_exposes_only_pdk_console_script(self):
-        with (ROOT / "pyproject.toml").open("rb") as file:
-            pyproject = tomllib.load(file)
-
-        self.assertEqual(pyproject["project"]["scripts"], {"pdk": "pdk.cli:main"})
-
-    def test_help_uses_pdk_program_name(self):
-        helped = run_pdk(self.tmp_path, "--help")
-        self.assertEqual(helped.returncode, 0)
-        self.assertIn("usage: pdk", helped.stdout)
-        self.assertIn("Prompt Deck", helped.stdout)
-        self.assertIn("AI context", helped.stdout)
-        self.assertIn("Workflows:", helped.stdout)
-        self.assertIn("How scope and projects fit together:", helped.stdout)
-        self.assertIn("Examples", helped.stdout)
-        self.assertIn("pdk session build sport", helped.stdout)
-        self.assertIn("pdk show workout --context", helped.stdout)
-        self.assertIn("pdk context client-a", helped.stdout)
-        self.assertIn("pdk context client-a --dir src --redact --budget 12000", helped.stdout)
-        self.assertIn("pdk context --profile default --copy", helped.stdout)
-        self.assertNotIn('pdk note add --title "Decision log" < notes.md', helped.stdout)
-
-    def test_session_and_clip_help_show_state_flow_commands(self):
-        clip_help = run_pdk(self.tmp_path, "clip", "--help")
-        self.assertEqual(clip_help.returncode, 0)
-        self.assertIn("--context", clip_help.stdout)
-
-        session_help = run_pdk(self.tmp_path, "session", "--help")
-        self.assertEqual(session_help.returncode, 0)
-        self.assertIn("clear", session_help.stdout)
-        self.assertIn("pdk clip workout --context", session_help.stdout)
-
-        clear_help = run_pdk(self.tmp_path, "session", "clear", "--help")
-        self.assertEqual(clear_help.returncode, 0)
-        self.assertIn("Delete .pdk/session.md", clear_help.stdout)
-
-    def test_readme_documents_v02_context_workflow(self):
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-
-        self.assertIn("Prompt Deck is a local AI context kit", readme)
-        self.assertIn("## Session context from Markdown folders", readme)
-        self.assertIn("pdk session build sport", readme)
-        self.assertIn("pdk show workout --context", readme)
-        self.assertIn("pdk clip workout --context", readme)
-        self.assertIn("pdk session clear", readme)
-        self.assertIn("saved session context", readme)
-        self.assertIn("pdk context --profile default --copy", readme)
-        self.assertIn("`pdk context` is the lower-level, universal context builder", readme)
-        self.assertIn("`pdk export` is different again", readme)
 
     def test_add_show_and_list(self):
         added = run_pdk(
@@ -1095,6 +979,50 @@ class CliTest(unittest.TestCase):
         pruned = run_pdk(self.tmp_path, "versions", "coach", "--prune", "--yes")
         self.assertEqual(pruned.returncode, 0)
         self.assertEqual(run_pdk(self.tmp_path, "versions", "coach").stdout, "")
+
+    def test_stats_use_tracks_command_variants_and_errors(self):
+        self.assertEqual(run_pdk(self.tmp_path, "add", "coach", input="body").returncode, 0)
+        self.assertEqual(run_pdk(self.tmp_path, "show", "coach").returncode, 0)
+        self.assertEqual(run_pdk(self.tmp_path, "show", "missing").returncode, 1)
+        self.assertEqual(run_pdk(self.tmp_path, "project", "create", "alpha").returncode, 0)
+
+        usage = run_pdk(self.tmp_path, "stats", "use")
+
+        self.assertEqual(usage.returncode, 0)
+        self.assertIn("variant\ttotal\tok\terrors\tlast used", usage.stdout)
+        self.assertIn("add\t1\t1\t0\t", usage.stdout)
+        self.assertIn("show\t2\t1\t1\t", usage.stdout)
+        self.assertIn("project create\t1\t1\t0\t", usage.stdout)
+
+    def test_stats_use_can_be_disabled_for_local_privacy(self):
+        env = {"PDK_DISABLE_ANALYTICS": "1"}
+        self.assertEqual(run_pdk(self.tmp_path, "add", "coach", input="body", env=env).returncode, 0)
+        self.assertEqual(run_pdk(self.tmp_path, "show", "coach", env=env).returncode, 0)
+
+        usage = run_pdk(self.tmp_path, "stats", "use", env=env)
+
+        self.assertEqual(usage.returncode, 0)
+        self.assertIn("variant\ttotal\tok\terrors\tlast used", usage.stdout)
+        self.assertNotIn("add\t", usage.stdout)
+        self.assertNotIn("show\t", usage.stdout)
+
+    def test_stats_mem_reports_prompt_and_index_weight(self):
+        source_file = self.tmp_path / "source.md"
+        source_file.write_text("Indexed file body.", encoding="utf-8")
+        self.assertEqual(run_pdk(self.tmp_path, "add", "coach", input="Prompt body").returncode, 0)
+        self.assertEqual(run_pdk(self.tmp_path, "feedback", "coach", input="Comment body").returncode, 0)
+        self.assertEqual(run_pdk(self.tmp_path, "index", str(source_file)).returncode, 0)
+
+        memory = run_pdk(self.tmp_path, "stats", "mem")
+
+        self.assertEqual(memory.returncode, 0)
+        self.assertIn("component\titems\tbytes\thuman\ttokens\tdetail", memory.stdout)
+        self.assertIn("prompts\t1\t11\t11 B\t", memory.stdout)
+        self.assertIn("feedback\t1\t12\t12 B\t", memory.stdout)
+        self.assertIn("indexed_files\t1\t18\t18 B\t", memory.stdout)
+        self.assertIn("index_chunks\t1\t18\t18 B\t", memory.stdout)
+        self.assertIn("prompt_db_file\t1\t", memory.stdout)
+        self.assertIn("index_db_file\t1\t", memory.stdout)
 
     def test_browse_search_open_print_and_quit(self):
         self.assertEqual(

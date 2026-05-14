@@ -29,7 +29,7 @@ class AudioModel:
 AUDIO_MODELS: dict[str, AudioModel] = {
     "large-v3-turbo": AudioModel(
         name="large-v3-turbo",
-        path=Path("/Users/vladimirkasterin/models/audio/faster-whisper-large-v3-turbo"),
+        path=Path("~/.cache/prompt-deck/models/audio/faster-whisper-large-v3-turbo").expanduser(),
         description="Local faster-whisper Large v3 Turbo model.",
     ),
 }

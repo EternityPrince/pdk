@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "prompt-deck"
 version = "0.1.0"
-description = "Prompt Deck is a tiny global prompt store CLI."
+description = "Prompt Deck is a local AI context kit for the shell."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -32,6 +32,7 @@ ml = [
     "transformers>=4.40",
 ]
 summary = [
+    "huggingface-hub>=0.24",
     "mlx-lm>=0.22",
 ]
 

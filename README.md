@@ -9,6 +9,7 @@ It is built around three everyday workflows:
 3. Index and digest files.
 
 ```bash
+./scripts/install.sh
 pdk add review --tag refactor < review.md
 pdk project init
 pdk session init
@@ -24,6 +25,21 @@ pdk context client-a --file README.md
 pdk context client-a --dir src --redact --budget 12000
 pdk export --format json --output backup.json
 ```
+
+For local development, `./scripts/install.sh` installs all optional dependency
+groups with `uv`, creates a private `.env` from `.env.example` if needed, and
+downloads the default summary LLM into `PDK_LLM_MODEL_DIR`. The default local
+path in `.env.example` is:
+
+```env
+PDK_LLM_MODEL_DIR=~/.cache/prompt-deck/models/llm
+```
+
+`.env` is ignored by git. If you keep a model somewhere else, set
+`PDK_SUMMARY_MODEL_PATH=/absolute/path/to/model` in `.env` to point directly to
+that directory. Set `PDK_DISABLE_ANALYTICS=1` to disable the local command usage
+log that powers `pdk stats use`; it stores command variants, status, timestamps,
+and terse error details only in the selected local SQLite store.
 
 ## Session context from Markdown folders
 
@@ -265,6 +281,8 @@ pdk tags
 pdk tag add review work important
 pdk tag rm review important
 pdk stats
+pdk stats use
+pdk stats mem
 pdk usage
 pdk doctor
 pdk duplicates
@@ -342,11 +360,11 @@ pdk digest 1 --generate
 The file index lives in the Prompt Deck application support directory as `index.sqlite3`. Files are tracked by path, size, mtime, SHA-256, extractor version, chunks, token counts, privacy findings, aggregated entities, and summaries. `pdk digest` stores a fast extractive summary by default. Use `--generate` to run a local Gemma 3 4B summary model through MLX:
 
 ```bash
-pip install 'prompt-deck[summary]'
+./scripts/install.sh
 pdk digest 1 --generate
 ```
 
-The default summary model is `mlx-community/gemma-3-text-4b-it-4bit`, an MLX 4-bit conversion for text generation. The original Google model is `google/gemma-3-4b-it`; Google describes Gemma 3 4B as instruction-tuned, multilingual, and suitable for summarization with a 128K token context window for 4B models.
+The default summary model is `mlx-community/gemma-3-text-4b-it-4bit`, an MLX 4-bit conversion for text generation. Prompt Deck first checks `.env` for `PDK_SUMMARY_MODEL_PATH`, then for a downloaded model under `PDK_LLM_MODEL_DIR/gemma-3-text-4b-it-4bit`, and only falls back to the Hugging Face model id if no local directory exists. The original Google model is `google/gemma-3-4b-it`; Google describes Gemma 3 4B as instruction-tuned, multilingual, and suitable for summarization with a 128K token context window for 4B models.
 
 Private-data detection is regex-based by default and can be customized in one global `privacy.toml`. You do not need to initialize a folder to use it:
 

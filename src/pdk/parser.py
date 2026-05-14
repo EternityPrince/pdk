@@ -71,7 +71,6 @@ from .commands import (
 )
 from .summary import DEFAULT_SUMMARY_MODEL
 
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pdk",
@@ -139,7 +138,26 @@ Run `pdk COMMAND --help` for command-specific examples.
         help="choose prompt store; auto uses .pdk when present",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+    _register_audio_commands(subparsers)
+    _register_prompt_core_commands(subparsers)
+    _register_scan_commands(subparsers)
+    _register_file_commands(subparsers)
+    _register_text_safety_commands(subparsers)
+    _register_prompt_library_commands(subparsers)
+    _register_stats_commands(subparsers)
+    _register_prompt_hygiene_commands(subparsers)
+    _register_project_commands(subparsers)
+    _register_privacy_commands(subparsers)
+    _register_note_commands(subparsers)
+    _register_transfer_commands(subparsers)
+    _register_context_session_commands(subparsers)
+    _register_security_commands(subparsers)
+    _register_completion_commands(subparsers)
+    _register_remove_commands(subparsers)
+    return parser
 
+
+def _register_audio_commands(subparsers) -> None:
     audio = subparsers.add_parser(
         "audio",
         help="record speech and transcribe it into text",
@@ -186,6 +204,7 @@ Model names:
     audio.add_argument("--no-timestamp", action="store_true", help="append the bullet without a timestamp")
     audio.set_defaults(func=cmd_audio)
 
+def _register_prompt_core_commands(subparsers) -> None:
     add = subparsers.add_parser(
         "add",
         help="save a prompt",
@@ -220,6 +239,7 @@ Project behavior:
     show.add_argument("--context", action="store_true", help="append the last built pdk session context")
     show.set_defaults(func=cmd_show)
 
+def _register_scan_commands(subparsers) -> None:
     scan = subparsers.add_parser(
         "scan",
         help="scan clipboard or files for private data",
@@ -245,6 +265,7 @@ Examples:
     scan.add_argument("--details", action="store_true", help="show detected spans without raw private values")
     scan.set_defaults(func=cmd_scan)
 
+def _register_file_commands(subparsers) -> None:
     index_cmd = subparsers.add_parser(
         "index",
         help="extract, scan, chunk, and store files",
@@ -324,6 +345,7 @@ Examples:
     file_entities.add_argument("--show-values", action="store_true", help="print raw entity values")
     file_entities.set_defaults(func=cmd_file_entities)
 
+def _register_text_safety_commands(subparsers) -> None:
     check = subparsers.add_parser(
         "check",
         help="inspect token and text stats",
@@ -400,6 +422,7 @@ Examples:
     )
     redact.set_defaults(func=cmd_redact)
 
+def _register_prompt_library_commands(subparsers) -> None:
     clip = subparsers.add_parser("clip", help="copy a prompt to the clipboard")
     clip.add_argument("name")
     clip.add_argument("--raw", action="store_true", help="copy template text without filling variables")
@@ -469,12 +492,28 @@ Examples:
     tag_rm.add_argument("tags", nargs="+")
     tag_rm.set_defaults(func=cmd_tag_rm)
 
-    stats = subparsers.add_parser("stats", help="show prompt usage statistics")
-    stats.add_argument("name", nargs="?")
+def _register_stats_commands(subparsers) -> None:
+    stats = subparsers.add_parser(
+        "stats",
+        help="show prompt, command, or memory statistics",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  pdk stats
+  pdk stats coach
+  pdk stats use
+  pdk stats mem
+  pdk stats --prompt use
+""",
+    )
+    stats.add_argument("stats_target", nargs="?", help="prompt name, or use/mem for operational stats")
+    stats.add_argument("--prompt", dest="prompt_name", help="force prompt stats for a prompt named use or mem")
+    stats.add_argument("--limit", type=int, default=50, help="maximum command rows for `stats use`")
     stats.add_argument("--project", help="filter by named project")
     stats.add_argument("--no-project", action="store_true", help="filter unbound prompts")
     stats.set_defaults(func=cmd_stats)
 
+def _register_prompt_hygiene_commands(subparsers) -> None:
     usage = subparsers.add_parser("usage", help="show detailed usage events")
     usage.add_argument("name", nargs="?")
     usage.add_argument("--limit", type=int, default=50)
@@ -607,6 +646,7 @@ Controls:
     browse.add_argument("--fzf", action="store_true", help="select with fzf and copy the chosen prompt")
     browse.set_defaults(func=cmd_browse)
 
+def _register_project_commands(subparsers) -> None:
     project = subparsers.add_parser(
         "project",
         help="initialize .pdk stores and manage named projects",
@@ -680,6 +720,7 @@ Use cases:
     project_status = project_subparsers.add_parser("status", help="show active prompt store")
     project_status.set_defaults(func=cmd_project_status)
 
+def _register_privacy_commands(subparsers) -> None:
     privacy = subparsers.add_parser(
         "privacy",
         help="manage private-data detection config",
@@ -713,6 +754,7 @@ Examples:
     privacy_profile_list = privacy_subparsers.add_parser("profiles", help="list privacy profiles in config")
     privacy_profile_list.set_defaults(func=cmd_privacy_profiles)
 
+def _register_note_commands(subparsers) -> None:
     note = subparsers.add_parser(
         "note",
         help="save and edit context notes",
@@ -749,6 +791,8 @@ Examples:
     note_versions.add_argument("id", type=int)
     note_versions.set_defaults(func=cmd_note_versions)
 
+
+def _register_transfer_commands(subparsers) -> None:
     export = subparsers.add_parser(
         "export",
         help="write the current context as Markdown",
@@ -804,6 +848,7 @@ Examples:
     import_cmd.add_argument("--dry-run", action="store_true", help="show what would be imported without writing")
     import_cmd.set_defaults(func=cmd_import)
 
+def _register_context_session_commands(subparsers) -> None:
     context = subparsers.add_parser(
         "context",
         help="write the current AI context",
@@ -915,6 +960,7 @@ Examples:
     )
     session_build.set_defaults(func=cmd_session_build)
 
+def _register_security_commands(subparsers) -> None:
     security = subparsers.add_parser(
         "security",
         help="inspect or encrypt the global prompt store",
@@ -940,6 +986,7 @@ Examples:
     security_unlock.add_argument("--passphrase", help=argparse.SUPPRESS)
     security_unlock.set_defaults(func=cmd_security_unlock)
 
+def _register_completion_commands(subparsers) -> None:
     completions = subparsers.add_parser(
         "completions",
         help="print shell completion script",
@@ -954,9 +1001,8 @@ Examples:
     completions.add_argument("shell", choices=("bash", "zsh", "fish"))
     completions.set_defaults(func=cmd_completions)
 
+def _register_remove_commands(subparsers) -> None:
     rm = subparsers.add_parser("rm", help="remove a prompt")
     rm.add_argument("name")
     rm.add_argument("--yes", action="store_true", help="confirm removal")
     rm.set_defaults(func=cmd_rm)
-
-    return parser

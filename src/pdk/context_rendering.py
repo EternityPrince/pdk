@@ -39,9 +39,8 @@ def _append_file_body(lines: list[str], file) -> None:
         lines.extend(["```", ""])
 
 
-def render_context_markdown(document: ContextDocument) -> str:
+def _append_metadata(lines: list[str], document: ContextDocument) -> None:
     options = document.options
-    lines: list[str] = ["# Prompt Deck Context", "", "## Metadata", ""]
     lines.append(f"- database: `{options.database}`")
     if options.project_filter:
         lines.append(f"- project: {options.project_name or 'unbound'}")
@@ -54,6 +53,9 @@ def render_context_markdown(document: ContextDocument) -> str:
         lines.append(f"- since: {options.since}")
     if options.budget is not None:
         lines.append(f"- budget: {options.budget}")
+
+
+def _append_index(lines: list[str], document: ContextDocument) -> None:
     lines.extend(["", "## Index", ""])
     index = document.index
     lines.append(
@@ -63,96 +65,129 @@ def render_context_markdown(document: ContextDocument) -> str:
     )
     lines.append("")
 
-    _append_module_map(lines, document)
 
+def _append_prompt_sections(lines: list[str], document: ContextDocument) -> None:
+    options = document.options
     lines.extend(["## Prompts", ""])
     if not document.prompts:
         lines.extend(["_No prompts in scope._", ""])
     for prompt in document.prompts:
-        lines.extend(
-            [
-                f"### {prompt.name}",
-                "",
-                f"- project: {prompt.project_name or 'unbound'}",
-                f"- tags: {', '.join(prompt.tags) or '-'}",
-                f"- created_at: {prompt.created_at}",
-                f"- updated_at: {prompt.updated_at}",
-                "",
-                "```text",
-            ]
-        )
-        lines.append(prompt.body.rstrip("\n"))
-        lines.extend(["```", ""])
+        _append_prompt(lines, prompt)
         if "comments" in options.includes:
-            lines.extend(["#### Comments", ""])
-            if prompt.comments:
-                for comment in prompt.comments:
-                    lines.append(f"- {comment.created_at} [{comment.id}]: {_md_escape(comment.body)}")
-            else:
-                lines.append("_No comments._")
-            lines.append("")
+            _append_prompt_comments(lines, prompt)
         if "versions" in options.includes:
-            lines.extend(["#### Versions", ""])
-            if prompt.versions:
-                for version in prompt.versions:
-                    lines.extend([f"- {version.created_at} [{version.id}] {version.reason}", "", "```text"])
-                    lines.append(version.body.rstrip("\n"))
-                    lines.extend(["```", ""])
-            else:
-                lines.extend(["_No previous versions._", ""])
+            _append_prompt_versions(lines, prompt)
 
+
+def _append_prompt(lines: list[str], prompt) -> None:
+    lines.extend(
+        [
+            f"### {prompt.name}",
+            "",
+            f"- project: {prompt.project_name or 'unbound'}",
+            f"- tags: {', '.join(prompt.tags) or '-'}",
+            f"- created_at: {prompt.created_at}",
+            f"- updated_at: {prompt.updated_at}",
+            "",
+            "```text",
+        ]
+    )
+    lines.append(prompt.body.rstrip("\n"))
+    lines.extend(["```", ""])
+
+
+def _append_prompt_comments(lines: list[str], prompt) -> None:
+    lines.extend(["#### Comments", ""])
+    if prompt.comments:
+        for comment in prompt.comments:
+            lines.append(f"- {comment.created_at} [{comment.id}]: {_md_escape(comment.body)}")
+    else:
+        lines.append("_No comments._")
+    lines.append("")
+
+
+def _append_prompt_versions(lines: list[str], prompt) -> None:
+    lines.extend(["#### Versions", ""])
+    if not prompt.versions:
+        lines.extend(["_No previous versions._", ""])
+        return
+    for version in prompt.versions:
+        lines.extend([f"- {version.created_at} [{version.id}] {version.reason}", "", "```text"])
+        lines.append(version.body.rstrip("\n"))
+        lines.extend(["```", ""])
+
+
+def _append_note_sections(lines: list[str], document: ContextDocument) -> None:
+    options = document.options
     if "notes" in options.includes:
         lines.extend(["## Notes", ""])
         if not document.notes:
             lines.extend(["_No notes in scope._", ""])
         for note in document.notes:
-            lines.extend(
-                [
-                    f"### {note.title or 'Untitled note'} [{note.id}]",
-                    "",
-                    f"- project: {note.project_name or 'unbound'}",
-                    f"- created_at: {note.created_at}",
-                    f"- updated_at: {note.updated_at}",
-                    "",
-                    "```text",
-                ]
-            )
-            lines.append(note.body.rstrip("\n"))
-            lines.extend(["```", ""])
+            _append_note(lines, note)
             if "versions" in options.includes:
-                lines.extend(["#### Note Versions", ""])
-                if note.versions:
-                    for version in note.versions:
-                        lines.extend([f"- {version.created_at} [{version.id}] {version.title or '-'}", "", "```text"])
-                        lines.append(version.body.rstrip("\n"))
-                        lines.extend(["```", ""])
-                else:
-                    lines.extend(["_No previous versions._", ""])
+                _append_note_versions(lines, note)
 
+
+def _append_note(lines: list[str], note) -> None:
+    lines.extend(
+        [
+            f"### {note.title or 'Untitled note'} [{note.id}]",
+            "",
+            f"- project: {note.project_name or 'unbound'}",
+            f"- created_at: {note.created_at}",
+            f"- updated_at: {note.updated_at}",
+            "",
+            "```text",
+        ]
+    )
+    lines.append(note.body.rstrip("\n"))
+    lines.extend(["```", ""])
+
+
+def _append_note_versions(lines: list[str], note) -> None:
+    lines.extend(["#### Note Versions", ""])
+    if not note.versions:
+        lines.extend(["_No previous versions._", ""])
+        return
+    for version in note.versions:
+        lines.extend([f"- {version.created_at} [{version.id}] {version.title or '-'}", "", "```text"])
+        lines.append(version.body.rstrip("\n"))
+        lines.extend(["```", ""])
+
+
+def _append_file_sections(lines: list[str], document: ContextDocument) -> None:
     if document.files:
         lines.extend(["## Files", ""])
         for file in document.files:
-            lines.extend(
-                [
-                    f"### {file.path}",
-                    "",
-                    f"- id: {file.id}",
-                    f"- modules: {', '.join(file.module_names) or '-'}",
-                    f"- kind: {file.kind}",
-                    f"- status: {file.status}",
-                    f"- size_bytes: {file.size_bytes}",
-                    f"- mtime: {file.mtime}",
-                    f"- sha256: {file.sha256}",
-                    f"- indexed_at: {file.indexed_at}",
-                    f"- tokens: {file.token_count}",
-                    f"- lines: {file.line_count}",
-                    f"- characters: {file.char_count}",
-                    f"- findings: {file.finding_count}",
-                    "",
-                ]
-            )
+            _append_file(lines, file)
             _append_file_body(lines, file)
 
+
+def _append_file(lines: list[str], file) -> None:
+    lines.extend(
+        [
+            f"### {file.path}",
+            "",
+            f"- id: {file.id}",
+            f"- modules: {', '.join(file.module_names) or '-'}",
+            f"- kind: {file.kind}",
+            f"- status: {file.status}",
+            f"- size_bytes: {file.size_bytes}",
+            f"- mtime: {file.mtime}",
+            f"- sha256: {file.sha256}",
+            f"- indexed_at: {file.indexed_at}",
+            f"- tokens: {file.token_count}",
+            f"- lines: {file.line_count}",
+            f"- characters: {file.char_count}",
+            f"- findings: {file.finding_count}",
+            "",
+        ]
+    )
+
+
+def _append_usage(lines: list[str], document: ContextDocument) -> None:
+    options = document.options
     if "usage" in options.includes:
         lines.extend(["## Usage Timeline", ""])
         if document.usage:
@@ -166,6 +201,16 @@ def render_context_markdown(document: ContextDocument) -> str:
             lines.append("_No usage in scope._")
         lines.append("")
 
+
+def render_context_markdown(document: ContextDocument) -> str:
+    lines: list[str] = ["# Prompt Deck Context", "", "## Metadata", ""]
+    _append_metadata(lines, document)
+    _append_index(lines, document)
+    _append_module_map(lines, document)
+    _append_prompt_sections(lines, document)
+    _append_note_sections(lines, document)
+    _append_file_sections(lines, document)
+    _append_usage(lines, document)
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -181,16 +226,8 @@ def _compact_file_groups(document: ContextDocument):
         yield "Unassigned", unassigned
 
 
-def render_context_compact_markdown(document: ContextDocument) -> str:
+def _append_compact_prompts(lines: list[str], document: ContextDocument) -> None:
     options = document.options
-    project = options.project_name or ("all" if not options.project_filter else "unbound")
-    lines: list[str] = ["# Prompt Deck Context", f"project: {project}; files: {len(document.files)}"]
-    if options.budget is not None:
-        lines[1] += f"; budget: {options.budget}"
-    lines.append("")
-
-    _append_module_map(lines, document)
-
     if document.prompts:
         lines.extend(["## Prompts", ""])
         for prompt in document.prompts:
@@ -207,6 +244,9 @@ def render_context_compact_markdown(document: ContextDocument) -> str:
                     lines.append(version.body.rstrip("\n"))
                     lines.extend(["```", ""])
 
+
+def _append_compact_notes(lines: list[str], document: ContextDocument) -> None:
+    options = document.options
     if "notes" in options.includes and document.notes:
         lines.extend(["## Notes", ""])
         for note in document.notes:
@@ -226,6 +266,8 @@ def render_context_compact_markdown(document: ContextDocument) -> str:
                     lines.append(version.body.rstrip("\n"))
                     lines.extend(["```", ""])
 
+
+def _append_compact_files(lines: list[str], document: ContextDocument) -> None:
     if document.files:
         lines.extend(["## Files", ""])
         for group_name, files in _compact_file_groups(document):
@@ -240,12 +282,29 @@ def render_context_compact_markdown(document: ContextDocument) -> str:
                 lines.append(((file.text if file.detail == "full" else file.summary) or "").rstrip("\n"))
                 lines.extend(["```", ""])
 
+
+def _append_compact_usage(lines: list[str], document: ContextDocument) -> None:
+    options = document.options
     if "usage" in options.includes and document.usage:
         lines.extend(["## Usage", ""])
         for event in document.usage:
             lines.append(f"- {event.used_at}: {event.action} ({', '.join(event.prompt_names) or '-'})")
         lines.append("")
 
+
+def render_context_compact_markdown(document: ContextDocument) -> str:
+    options = document.options
+    project = options.project_name or ("all" if not options.project_filter else "unbound")
+    lines: list[str] = ["# Prompt Deck Context", f"project: {project}; files: {len(document.files)}"]
+    if options.budget is not None:
+        lines[1] += f"; budget: {options.budget}"
+    lines.append("")
+
+    _append_module_map(lines, document)
+    _append_compact_prompts(lines, document)
+    _append_compact_notes(lines, document)
+    _append_compact_files(lines, document)
+    _append_compact_usage(lines, document)
     return "\n".join(lines).rstrip() + "\n"
 
 

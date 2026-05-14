@@ -13,6 +13,40 @@ from .ui import ColorMode, ConsoleStyle, PromptFormatter
 from .variables import VariablePrompter
 
 
+PROMPT_ACTIONS = {
+    "": "show",
+    "o": "show",
+    "open": "show",
+    "show": "show",
+    "print": "print",
+    "b": "back",
+    "back": "back",
+    "q": "quit",
+    "quit": "quit",
+    "exit": "quit",
+    "n": "next",
+    "next": "next",
+    "p": "previous",
+    "prev": "previous",
+    "previous": "previous",
+    "c": "copy",
+    "copy": "copy",
+    "cf": "copy-filled",
+    "copy filled": "copy-filled",
+    "copy-filled": "copy-filled",
+    "e": "edit",
+    "edit": "edit",
+    "f": "feedback",
+    "feedback": "feedback",
+    "t": "tags",
+    "tags": "tags",
+    "v": "versions",
+    "versions": "versions",
+    "?": "help",
+    "help": "help",
+}
+
+
 @dataclass
 class BrowserState:
     query: str | None = None
@@ -66,32 +100,42 @@ class InteractiveBrowser:
             prompts = self._matching_prompts()
             self._render_home(prompts)
             command = self._ask("browse> ").strip()
-            if command in {"q", "quit", "exit"}:
+            if not self._handle_browse_command(command, prompts):
                 return 0
-            if command in {"?", "help"}:
-                self._render_help()
-                continue
-            if command in {"r", "refresh"}:
-                continue
-            if command in {"", "o", "open"}:
-                self._open_by_index(prompts, 1)
-                continue
-            if command == "/":
-                self._state = BrowserState()
-                continue
-            if command == "tags":
-                self._render_tags()
-                continue
-            if command.startswith("#"):
-                self._state = BrowserState(tags=TagSet.from_values([command[1:]]).names)
-                continue
-            if command.startswith("/"):
-                self._state = BrowserState(query=command[1:].strip() or None)
-                continue
-            if command.isdecimal():
-                self._open_by_index(prompts, int(command))
-                continue
-            self._state = BrowserState(query=command or None)
+
+    def _handle_browse_command(self, command: str, prompts: list[Prompt]) -> bool:
+        if command in {"q", "quit", "exit"}:
+            return False
+        if command in {"?", "help"}:
+            self._render_help()
+            return True
+        if command in {"r", "refresh"}:
+            return True
+        if command in {"", "o", "open"}:
+            self._open_by_index(prompts, 1)
+            return True
+        if command == "tags":
+            self._render_tags()
+            return True
+        if self._apply_browse_filter(command):
+            return True
+        if command.isdecimal():
+            self._open_by_index(prompts, int(command))
+            return True
+        self._state = BrowserState(query=command or None)
+        return True
+
+    def _apply_browse_filter(self, command: str) -> bool:
+        if command == "/":
+            self._state = BrowserState()
+            return True
+        if command.startswith("#"):
+            self._state = BrowserState(tags=TagSet.from_values([command[1:]]).names)
+            return True
+        if command.startswith("/"):
+            self._state = BrowserState(query=command[1:].strip() or None)
+            return True
+        return False
 
     def _matching_prompts(self) -> list[Prompt]:
         return self._store.list(
@@ -153,75 +197,81 @@ class InteractiveBrowser:
     def _open_prompt(self, name: str) -> None:
         while True:
             prompts = self._matching_prompts()
-            names = [prompt.name for prompt in prompts]
-            if name not in names:
+            index = self._prompt_index(prompts, name)
+            if index is None:
                 self._line(self._style.paint("Current prompt is outside the active filter.", "yellow"))
                 return
-            index = names.index(name)
             prompt = self._store.get(name)
             self._render_prompt(prompt)
             command = self._ask("prompt> ").strip()
-            if command == "":
-                self._print_prompt(prompt)
-                self._store.record_usage(UsageAction.BROWSE, [prompt.name], detail="show")
-                continue
-            if command in {"b", "back"}:
+            next_name = self._handle_prompt_command(command, prompt, prompts, index)
+            if next_name is None:
                 return
-            if command in {"q", "quit", "exit"}:
-                raise SystemExit(0)
-            if command in {"o", "open", "show"}:
-                self._print_prompt(prompt)
-                self._store.record_usage(UsageAction.BROWSE, [prompt.name], detail="show")
-                continue
-            if command in {"print"}:
-                self._print_prompt(prompt)
-                self._store.record_usage(UsageAction.BROWSE, [prompt.name], detail="print")
-                continue
-            if command in {"n", "next"}:
-                if index + 1 >= len(prompts):
-                    self._line(self._style.paint("Already at the last prompt.", "yellow"))
-                else:
-                    name = prompts[index + 1].name
-                continue
-            if command in {"p", "prev", "previous"}:
-                if index == 0:
-                    self._line(self._style.paint("Already at the first prompt.", "yellow"))
-                else:
-                    name = prompts[index - 1].name
-                continue
-            if command in {"c", "copy"}:
-                self._copy_prompt(prompt)
-                continue
-            if command in {"cf", "copy filled", "copy-filled"}:
-                self._copy_filled_prompt(prompt)
-                continue
-            if command in {"e", "edit"}:
-                self._edit_prompt(prompt)
-                continue
-            if command in {"f", "feedback"}:
-                self._add_feedback(prompt)
-                continue
-            if command in {"t", "tags"}:
-                self._edit_tags(prompt)
-                continue
-            if command in {"v", "versions"}:
-                self._show_versions(prompt)
-                continue
-            if command in {"?", "help"}:
-                self._render_prompt_help()
-                continue
-            if command == "/":
-                self._state = BrowserState()
-                continue
-            if command.startswith("/"):
-                self._state = BrowserState(query=command[1:].strip() or None)
-                matches = self._matching_prompts()
-                if matches:
-                    name = matches[0].name
-                else:
-                    self._line(self._style.paint("No prompts found.", "yellow"))
-                continue
-            self._line(self._style.paint("Unknown action. Type ? for actions.", "yellow"))
+            name = next_name
+
+    def _prompt_index(self, prompts: list[Prompt], name: str) -> int | None:
+        names = [prompt.name for prompt in prompts]
+        return names.index(name) if name in names else None
+
+    def _handle_prompt_command(
+        self,
+        command: str,
+        prompt: Prompt,
+        prompts: list[Prompt],
+        index: int,
+    ) -> str | None:
+        action = PROMPT_ACTIONS.get(command)
+        if action == "back":
+            return None
+        if action == "quit":
+            raise SystemExit(0)
+        if action in {"show", "print"}:
+            self._show_prompt_body(prompt, detail=action)
+            return prompt.name
+        if action in {"next", "previous"}:
+            return self._move_prompt(prompts, index, action)
+        if action in {"copy", "copy-filled", "edit", "feedback", "tags", "versions", "help"}:
+            self._run_prompt_action(action, prompt)
+            return prompt.name
+        if command == "/" or command.startswith("/"):
+            return self._search_from_prompt(command, prompt.name)
+        self._line(self._style.paint("Unknown action. Type ? for actions.", "yellow"))
+        return prompt.name
+
+    def _show_prompt_body(self, prompt: Prompt, *, detail: str) -> None:
+        self._print_prompt(prompt)
+        self._store.record_usage(UsageAction.BROWSE, [prompt.name], detail=detail)
+
+    def _move_prompt(self, prompts: list[Prompt], index: int, action: str) -> str:
+        if action == "next" and index + 1 < len(prompts):
+            return prompts[index + 1].name
+        if action == "previous" and index > 0:
+            return prompts[index - 1].name
+        message = "Already at the last prompt." if action == "next" else "Already at the first prompt."
+        self._line(self._style.paint(message, "yellow"))
+        return prompts[index].name
+
+    def _run_prompt_action(self, action: str, prompt: Prompt) -> None:
+        handlers = {
+            "copy": self._copy_prompt,
+            "copy-filled": self._copy_filled_prompt,
+            "edit": self._edit_prompt,
+            "feedback": self._add_feedback,
+            "tags": self._edit_tags,
+            "versions": self._show_versions,
+        }
+        if action == "help":
+            self._render_prompt_help()
+            return
+        handlers[action](prompt)
+
+    def _search_from_prompt(self, command: str, current_name: str) -> str:
+        self._state = BrowserState(query=command[1:].strip() or None) if command.startswith("/") else BrowserState()
+        matches = self._matching_prompts()
+        if matches:
+            return matches[0].name
+        self._line(self._style.paint("No prompts found.", "yellow"))
+        return current_name
 
     def _render_prompt(self, prompt: Prompt) -> None:
         self._line("")

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-from functools import lru_cache
-
+from .model_loader import load_mlx_model, resolve_summary_model
 
 DEFAULT_SUMMARY_MODEL = "mlx-community/gemma-3-text-4b-it-4bit"
 SUMMARY_PROMPT_VERSION = "gemma3-4b-ru-v1"
@@ -9,15 +8,6 @@ SUMMARY_PROMPT_VERSION = "gemma3-4b-ru-v1"
 
 class SummaryModelError(Exception):
     pass
-
-
-@lru_cache(maxsize=2)
-def _load_mlx_model(model_name: str):
-    try:
-        from mlx_lm import load
-    except ModuleNotFoundError as exc:
-        raise SummaryModelError("Gemma digest generation requires installing the `summary` extra") from exc
-    return load(model_name)
 
 
 def _format_prompt(tokenizer, text: str) -> str:
@@ -52,7 +42,11 @@ def generate_summary(
         from mlx_lm import generate
     except ModuleNotFoundError as exc:
         raise SummaryModelError("Gemma digest generation requires installing the `summary` extra") from exc
-    model, tokenizer = _load_mlx_model(model_name)
+    resolved_model = resolve_summary_model(model_name)
+    try:
+        model, tokenizer = load_mlx_model(resolved_model)
+    except RuntimeError as exc:
+        raise SummaryModelError(str(exc)) from exc
     prompt = _format_prompt(tokenizer, text[:max_input_chars])
     try:
         return generate(

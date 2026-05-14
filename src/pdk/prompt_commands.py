@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import TextIO
 
+from .analytics import AnalyticsStore, MemoryUsageRow
 from .command_support import (
     CliError,
     _context,
@@ -234,10 +235,21 @@ def cmd_tag_rm(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: 
 
 
 def cmd_stats(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
+    if getattr(args, "prompt_name", None):
+        return _cmd_prompt_stats(args, stdout, args.prompt_name)
+    target = getattr(args, "stats_target", None)
+    if target == "use":
+        return _cmd_command_usage_stats(args, stdout)
+    if target == "mem":
+        return _cmd_memory_stats(args, stdout)
+    return _cmd_prompt_stats(args, stdout, target)
+
+
+def _cmd_prompt_stats(args: argparse.Namespace, stdout: TextIO, name: str | None) -> int:
     store = _store(args)
     style = ConsoleStyle(args.color, stdout)
     project_id, project_filter, _ = _project_selection(args, store)
-    rows = store.stats(args.name, project_id=project_id, project_filter=project_filter)
+    rows = store.stats(name, project_id=project_id, project_filter=project_filter)
     stdout.write(f"{style.paint('prompt', 'bold')}\tshows\tedits\tfeedback\tlast used\n")
     for row in rows:
         stdout.write(
@@ -246,6 +258,43 @@ def cmd_stats(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: T
             f"{row.last_used_at or '-'}\n"
         )
     return 0
+
+
+def _cmd_command_usage_stats(args: argparse.Namespace, stdout: TextIO) -> int:
+    context = _context(args)
+    style = ConsoleStyle(args.color, stdout)
+    rows = AnalyticsStore(context.database_path).command_usage(limit=args.limit)
+    stdout.write(f"{style.paint('variant', 'bold')}\ttotal\tok\terrors\tlast used\n")
+    for row in rows:
+        stdout.write(
+            f"{style.paint(row.variant, 'magenta')}\t"
+            f"{row.total_count}\t{row.ok_count}\t{row.error_count}\t{row.last_used_at or '-'}\n"
+        )
+    return 0
+
+
+def _format_bytes(value: int) -> str:
+    units = ("B", "KiB", "MiB", "GiB")
+    size = float(value)
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            return f"{int(size)} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{value} B"
+
+
+def _cmd_memory_stats(args: argparse.Namespace, stdout: TextIO) -> int:
+    context = _context(args)
+    rows = AnalyticsStore(context.database_path).memory_usage()
+    stdout.write("component\titems\tbytes\thuman\ttokens\tdetail\n")
+    for row in rows:
+        stdout.write(_memory_row(row))
+    return 0
+
+
+def _memory_row(row: MemoryUsageRow) -> str:
+    tokens = "-" if row.tokens is None else str(row.tokens)
+    return f"{row.component}\t{row.items}\t{row.bytes}\t{_format_bytes(row.bytes)}\t{tokens}\t{row.detail or '-'}\n"
 
 
 def cmd_usage(args: argparse.Namespace, stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:

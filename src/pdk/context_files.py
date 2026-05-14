@@ -203,7 +203,7 @@ def context_file_from_record(
     )
 
 
-def collect_context_files(index: FileIndex, options: ContextOptions) -> tuple[ContextFile, ...]:
+def _collect_file_candidates(index: FileIndex, options: ContextOptions) -> list[FileCandidate]:
     candidates = [_explicit_candidate(index, target) for target in options.file_targets]
     candidates.extend(_dir_candidates(index, options.dir_targets))
     for module in options.modules:
@@ -226,35 +226,61 @@ def collect_context_files(index: FileIndex, options: ContextOptions) -> tuple[Co
                 exclude_patterns=module.exclude_patterns,
             )
         )
+    return candidates
 
-    ignore_root = options.ignore_root or Path.cwd()
+
+def _candidate_roots(options: ContextOptions, ignore_root: Path) -> tuple[Path, ...]:
     module_roots = tuple(_resolved_path(target) for module in options.modules for target in module.dirs)
-    cli_roots = (
-        tuple(_resolved_path(target) for target in options.dir_targets)
-        + module_roots
-        + (Path.cwd().resolve(), ignore_root)
+    return tuple(_resolved_path(target) for target in options.dir_targets) + module_roots + (
+        Path.cwd().resolve(),
+        ignore_root,
     )
+
+
+def _candidate_excluded(
+    candidate: FileCandidate,
+    options: ContextOptions,
+    *,
+    cli_roots: tuple[Path, ...],
+    ignore_root: Path,
+    pdkignore_patterns: tuple[str, ...],
+) -> bool:
+    path = _resolved_path(candidate.record.path)
+    if candidate.from_dir and _matches_any(path, BUILTIN_DIR_EXCLUDES, cli_roots):
+        return True
+    if candidate.from_dir and _matches_any(path, pdkignore_patterns, (ignore_root, Path.cwd().resolve())):
+        return True
+    if _matches_any(path, options.file_exclude_patterns, cli_roots):
+        return True
+    if _matches_any(path, candidate.exclude_patterns, cli_roots):
+        return True
+    if options.file_include_patterns and not _matches_any(path, options.file_include_patterns, cli_roots):
+        return True
+    return bool(candidate.include_patterns and not _matches_any(path, candidate.include_patterns, cli_roots))
+
+
+def _filter_candidates(candidates: list[FileCandidate], options: ContextOptions) -> list[FileCandidate]:
+    ignore_root = options.ignore_root or Path.cwd()
+    cli_roots = _candidate_roots(options, ignore_root)
     pdkignore_patterns = _read_pdkignore(ignore_root)
     filtered: list[FileCandidate] = []
     for candidate in candidates:
-        path = _resolved_path(candidate.record.path)
-        if candidate.from_dir and _matches_any(path, BUILTIN_DIR_EXCLUDES, cli_roots):
-            continue
-        if candidate.from_dir and _matches_any(path, pdkignore_patterns, (ignore_root, Path.cwd().resolve())):
-            continue
-        if _matches_any(path, options.file_exclude_patterns, cli_roots):
-            continue
-        if _matches_any(path, candidate.exclude_patterns, cli_roots):
-            continue
-        if options.file_include_patterns and not _matches_any(path, options.file_include_patterns, cli_roots):
-            continue
-        if candidate.include_patterns and not _matches_any(path, candidate.include_patterns, cli_roots):
+        if _candidate_excluded(
+            candidate,
+            options,
+            cli_roots=cli_roots,
+            ignore_root=ignore_root,
+            pdkignore_patterns=pdkignore_patterns,
+        ):
             continue
         filtered.append(candidate)
+    return filtered
 
+
+def _merge_context_files(index: FileIndex, candidates: list[FileCandidate], detail: str) -> tuple[ContextFile, ...]:
     seen: dict[int, int] = {}
     files: list[ContextFile] = []
-    for candidate in filtered:
+    for candidate in candidates:
         module_names = (candidate.module_name,) if candidate.module_name else ()
         if candidate.record.id in seen:
             index_in_files = seen[candidate.record.id]
@@ -268,8 +294,14 @@ def collect_context_files(index: FileIndex, options: ContextOptions) -> tuple[Co
             context_file_from_record(
                 index,
                 candidate.record,
-                detail=options.file_detail,
+                detail=detail,
                 module_names=module_names,
             )
         )
     return tuple(files)
+
+
+def collect_context_files(index: FileIndex, options: ContextOptions) -> tuple[ContextFile, ...]:
+    candidates = _collect_file_candidates(index, options)
+    filtered = _filter_candidates(candidates, options)
+    return _merge_context_files(index, filtered, options.file_detail)

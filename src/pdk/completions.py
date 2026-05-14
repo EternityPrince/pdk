@@ -47,6 +47,7 @@ COMPLETION_COMMANDS = (
 def bash_completion() -> str:
     commands = " ".join(COMPLETION_COMMANDS)
     session_commands = "init list build show clear"
+    stats_commands = "use mem"
     return f"""_pdk_complete()
 {{
     local cur prev
@@ -61,6 +62,13 @@ def bash_completion() -> str:
         session)
             if [[ $COMP_CWORD -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "{session_commands}" -- "$cur") )
+            else
+                COMPREPLY=()
+            fi
+            ;;
+        stats)
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "{stats_commands}" -- "$cur") )
             else
                 COMPREPLY=()
             fi
@@ -84,12 +92,14 @@ def zsh_completion() -> str:
         "'build:build session context' 'show:print last session context' "
         "'clear:delete last session context'"
     )
+    stats_commands = "'use:show command usage statistics' 'mem:show storage weight statistics'"
     return f"""#compdef pdk
 _pdk() {{
-  local -a commands prompts session_commands
+  local -a commands prompts session_commands stats_commands
   commands=({commands})
   prompts=(${{(f)"$(pdk list 2>/dev/null | awk 'NR>1 {{print $1}}')"}})
   session_commands=({session_commands})
+  stats_commands=({stats_commands})
   if (( CURRENT == 2 )); then
     _describe 'command' commands
     return
@@ -98,6 +108,11 @@ _pdk() {{
     session)
       if (( CURRENT == 3 )); then
         _describe 'session command' session_commands
+      fi
+      ;;
+    stats)
+      if (( CURRENT == 3 )); then
+        _describe 'stats command' stats_commands
       fi
       ;;
     show|edit|clip|use|rm|rename|feedback|comment|versions)
@@ -118,6 +133,8 @@ def fish_completion() -> str:
         f"{command_lines}\n"
         "complete -c pdk -f -n '__fish_seen_subcommand_from session; "
         "and not __fish_seen_subcommand_from init list build show clear' -a 'init list build show clear'\n"
+        "complete -c pdk -f -n '__fish_seen_subcommand_from stats; "
+        "and not __fish_seen_subcommand_from use mem' -a 'use mem'\n"
         f"complete -c pdk -f -n 'contains (commandline -opc)[2] {prompt_commands}' "
         """-a '(pdk list 2>/dev/null | awk "NR>1 {print \\$1}")'\n"""
     )
